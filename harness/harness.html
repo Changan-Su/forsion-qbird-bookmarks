@@ -1,0 +1,150 @@
+<!doctype html><html><head><meta charset="utf-8"><title>bluebird harness</title>
+<style>
+  /* 真 LCL token(照抄 desktop/frontend/src/theme/skins.css),三态覆盖三种强调色处境:
+     深字强调×浅底 / 浅字强调×深底(#f8f7f6,white 按钮字必死) / 粉彩强调×深底。 */
+  :root, :root[data-skin="cream"][data-mode="light"] {
+    color-scheme: light;
+    --bg:#f8f7f6; --bg-card:#fdfdfc; --sidebar-bg:#f2f1ef;
+    --text:#1c1c1c; --text-light:rgba(28,28,28,.82); --text-muted:#5f5f5d; --text-faint:rgba(28,28,28,.4);
+    --border:#eae9e7; --shadow:rgba(0,0,0,.05); --overlay-medium:rgba(28,28,28,.07);
+    --accent:#1c1c1c; --accent-hover:#000000; --accent-light:rgba(28,28,28,.05); --on-accent:#fbfbfa; --danger:#a3503f;
+  }
+  :root[data-skin="cream"][data-mode="dark"] {
+    color-scheme: dark;
+    --bg:#2a292b; --bg-card:#353538; --sidebar-bg:#323235;
+    --text:#f2efe8; --text-light:rgba(242,239,232,.82); --text-muted:#a8a096; --text-faint:rgba(242,239,232,.42);
+    --border:#34302a; --shadow:rgba(0,0,0,.4); --overlay-medium:rgba(242,239,232,.08);
+    --accent:#f8f7f6; --accent-hover:#f9f8f8; --accent-light:rgba(248,247,246,.16); --on-accent:#161018; --danger:#d99080;
+  }
+  :root[data-skin="echo"][data-mode="dark"] {
+    color-scheme: dark;
+    --bg:#19131a; --bg-card:#241b26; --sidebar-bg:#1f1722;
+    --text:#f3eaf5; --text-light:rgba(243,234,245,.82); --text-muted:#b3a3bb; --text-faint:rgba(243,234,245,.42);
+    --border:#352b3a; --shadow:rgba(0,0,0,.4); --overlay-medium:rgba(243,234,245,.09);
+    --accent:#ff9a7d; --accent-hover:#ffb199; --accent-light:rgba(255,154,125,.14); --on-accent:#2a160f; --danger:#f08a7a;
+  }
+  body { margin:0; height:100vh; display:flex; font:14px system-ui; color:var(--text); background:var(--bg); }
+  #lib { width:270px; flex:0 0 auto; border-right:1px solid var(--border); background:var(--sidebar-bg); }
+  #main { flex:1; min-width:0; }
+  #bar { position:fixed; right:8px; bottom:8px; z-index:999; }
+  #lib>*, #main>* { height:100%; }
+</style></head>
+<body>
+  <div id="lib"></div>
+  <div id="main"></div>
+  <div id="bar"><button onclick="cycleSkin()" id="skinbtn">配色</button></div>
+  <script>
+    const SKINS = [['cream','light'],['cream','dark'],['echo','dark']]
+    let _si = 0
+    function setSkin(i) { _si = i % SKINS.length; const [s, m] = SKINS[_si]; const d = document.documentElement
+      d.dataset.skin = s; d.dataset.mode = m; if (m === 'dark') d.classList.add('dark'); else d.classList.remove('dark')
+      document.getElementById('skinbtn').textContent = `${s}/${m} ▸` }
+    const cycleSkin = () => setSkin(_si + 1)
+    setSkin(0)
+
+    // 仪器:三套配色跑一遍,按 alpha 逐层合成算真实 WCAG 对比度,列出 < 3:1 的元素。
+    // 控制台跑 await __bbAudit()。2026-07-25 就是靠它定死"白字压纸白强调色"那批按钮。
+    const _px = (s) => { const m = (s.match(/[\d.]+/g) || [0,0,0,0]).map(Number); return [m[0]||0, m[1]||0, m[2]||0, m[3] === undefined ? 1 : m[3]] }
+    const _lum = (c) => { const g = (v) => { v /= 255; return v <= .03928 ? v/12.92 : Math.pow((v+.055)/1.055, 2.4) }; return .2126*g(c[0]) + .7152*g(c[1]) + .0722*g(c[2]) }
+    const _over = (f, b) => [0,1,2].map(i => f[i]*f[3] + b[i]*(1-f[3]))
+    function _bg(el) { const st = []
+      for (let n = el; n; n = n.parentElement) { const c = _px(getComputedStyle(n).backgroundColor); st.push(c); if (c[3] >= 1) break }
+      let out = st.pop(); if (!out || out[3] < 1) out = [255,255,255,1]
+      while (st.length) out = _over(st.pop(), out); return out }
+    const _cr = (a, b) => { const x = _lum(a), y = _lum(b); return +((Math.max(x,y)+.05)/(Math.min(x,y)+.05)).toFixed(2) }
+    window.__bbAudit = async (min = 3) => { const bad = {}
+      const SEL = '.bb-btn,.bb-tab,.bb-msg,.bb-menu>div,.bb-card .ttl,.bb-fold,.bb-ts,.bb-hero h1,.bb-input,.bb-sel,.bb-badge,.bb-label,.bb-empty,.bb-muted,.bb-seg span,.bb-out a'
+      for (let i = 0; i < SKINS.length; i++) { setSkin(i); await new Promise(r => setTimeout(r, 250))
+        document.querySelector('#lib [data-newfolder]')?.click(); await new Promise(r => setTimeout(r, 150))
+        // ⚠️ 祖先内联改自定义属性后,Chromium 的 getComputedStyle 会读到陈旧值(渲染却是对的)——
+        //    不强制重算就会满屏假阳性(实测:珊瑚色按钮被读成 transparent)。display 抽一下即失效重算。
+        document.querySelectorAll('.bb-root, .bb-layer').forEach(n => { const d = n.style.display; n.style.display = 'none'; void n.offsetHeight; n.style.display = d })
+        const hits = [...document.querySelectorAll(SEL)].map(e => { const b = _bg(e)
+            return { el: (e.getAttribute('class') || e.tagName) + '▸' + (e.textContent || e.placeholder || '').trim().slice(0, 8), r: _cr(_over(_px(getComputedStyle(e).color), b), b) } })
+          .filter(x => x.r < min).sort((a, b) => a.r - b.r)
+        const seen = new Set(); bad[SKINS[i].join('/')] = hits.filter(x => !seen.has(x.el) && seen.add(x.el))
+        document.querySelectorAll('.bb-menu').forEach(m => m.remove()) }
+      return bad }
+</script>
+<script>
+const realFetch = window.fetch.bind(window) // 先抓真 fetch,免得被下面的假引擎拦掉 main.js 加载
+// 内存 vault(ctx.app 文件读写)
+const VAULT = new Map()
+const views = {}
+const ctx = {
+  registerView: (v) => { views[v.id] = v },
+  registerCommand: () => {}, registerSetting: () => {}, registerStatusItem: () => ({ update(){}, dispose(){} }),
+  notify: (m, o) => console.log('[notify]', (o&&o.level)||'info', m),
+  activity: { log: (e, d) => console.log('[activity]', e, d) },
+  openView: (id) => { const vid = id.split(':').pop(); mountInto('main', vid) },
+  app: {
+    notify: (m) => console.log('[toast]', m),
+    readFile: async (p) => VAULT.has(p) ? VAULT.get(p) : null,
+    writeFile: async (p, t) => { VAULT.set(p, t); console.log('[writeFile]', p, t.length+'b') },
+    openFile: (p) => console.log('[openFile]', p),
+  },
+}
+window.tangu = { getConfig: async () => ({ backendUrl: 'http://mock', token: 'tok', modelId: 'm', homeDir: '/home', defaultWorkspaceDir: '/ws' }) }
+
+// 假引擎:POST /agent/runs → runId;GET events → SSE(token 分块 + done)
+const SUMMARY = `# 如何高效学习\n\n本视频讲了两个核心方法,不看原片也能掌握。\n\n## 间隔重复 [0:05]\n- 把复习**分散**到多天,而不是一次刷完。\n- 遗忘曲线是关键,间隔越拉长记得越牢。\n\n## 主动回忆 [0:30]\n- 合上书**自己回想**,比反复重读有效得多。\n\n> 记住:输入不等于掌握。`
+const DATA = {"meta":{"title":"如何高效学习","platform":"youtube","videoId":"dQw4w9WgXcQ","videoUrl":"https://youtu.be/dQw4w9WgXcQ","author":"示例作者","duration":600},"segments":[{"start":0,"end":5,"text":"大家好,今天聊聊学习方法。"},{"start":5,"end":12,"text":"第一点是间隔重复。"},{"start":30,"end":40,"text":"第二点是主动回忆,合上书自己想。"}],"chapters":[{"t":0,"title":"开场"},{"t":30,"title":"方法二"}],"tags":["学习","效率","记忆"]}
+const FULL = SUMMARY + '\n\n```json bluebird\n' + JSON.stringify(DATA) + '\n```'
+// 每个事件之间留 STEP_MS —— 真 run 是几十秒级的,一口气喷完则进度条根本观察不到(也截不到图)。
+// 想秒完就在控制台设 window.STEP_MS = 0。
+window.STEP_MS = 160
+function sse(events, signal) {
+  const enc = new TextEncoder(); let i = 0
+  const abort = () => { const e = new Error('aborted'); e.name = 'AbortError'; return e }
+  return { getReader: () => ({ read: async () => {
+    if (signal?.aborted) throw abort()
+    if (i >= events.length) return { done: true }
+    if (window.STEP_MS) await new Promise((r) => setTimeout(r, window.STEP_MS))
+    if (signal?.aborted) throw abort() // 真 fetch 会中断流;假引擎不认 signal 的话「返回/重新总结」后 busy 闸会一直卡住
+    const e = events[i++]; return { done: false, value: enc.encode(`data: ${JSON.stringify(e)}\n\n`) }
+  } }) }
+}
+let RID = 0 // 队列会起多个 run,runId 必须唯一
+window.fetch = async (url, opts) => {
+  if (/\/agent\/runs$/.test(url)) return { ok: true, json: async () => ({ runId: 'r' + (++RID) }) }
+  if (/\/events/.test(url)) {
+    // 照真引擎的事件序:status → tool_call(run_bash 抓字幕)→ tool_result → token×3 → done
+    // (进度条吃的就是这些真事件;别简化掉,否则进度条在 harness 里永远只有 0% 和 100%)
+    const evs = [
+      { seq: 1, type: 'status', payload: { state: 'queued' } },
+      { seq: 2, type: 'status', payload: { state: 'running' } },
+      { seq: 3, type: 'tool_call', payload: { name: 'run_bash', arguments: '{"cmd":"python3 transcribe.py …"}' } },
+      { seq: 4, type: 'tool_result', payload: { name: 'run_bash' } },
+    ]
+    const chunks = [FULL.slice(0, 40), FULL.slice(40, 120), FULL]
+    chunks.forEach((c, i) => evs.push({ seq: 5 + i, type: 'token', payload: { delta: i === 0 ? c : c.slice(chunks[i - 1].length) } }))
+    evs.push({ seq: 99, type: 'done', payload: { content: FULL } })
+    return { ok: true, body: sse(evs, opts && opts.signal) }
+  }
+  return { ok: false, status: 404, text: async () => 'nope' }
+}
+
+function mountInto(slot, vid) {
+  const el = document.getElementById(slot)
+  if (el._dispose) { try { el._dispose() } catch (e) {} }
+  el.innerHTML = ''
+  const v = views[vid]; if (!v) return
+  el._dispose = v.mount(el) || null
+}
+
+realFetch('../main.js?t=' + Date.now()).then(r => r.text()).then(src => {
+  new Function('ctx', src)(ctx)
+  // 预置一条收藏(在 mount 前,便于看 library 列表;抖音无内嵌+封面 → 走「缩略图占位」渲染路径;bilibili 现在能内嵌了)
+  const BMETA = { title:'如何高效学习', platform:'douyin', videoId:'', videoUrl:'https://www.douyin.com/video/7000000000000000000', author:'示例作者', duration:600, thumbnail:'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg' }
+  VAULT.set('videos/.bluebird-index.json', JSON.stringify({ folders:[{id:'f1',name:'学习'}], items:[{id:'e1',title:'如何高效学习',platform:'douyin',videoId:'',videoUrl:BMETA.videoUrl,folderId:'f1',date:'2026-07-24',duration:600,author:'示例作者'}] }))
+  VAULT.set('videos/.bluebird/e1.json', JSON.stringify({ id:'e1', summaryMarkdown: SUMMARY, meta: BMETA, segments: DATA.segments, chapters: DATA.chapters, tags: DATA.tags, sourceUrl: BMETA.videoUrl, detail:'standard', generatedAt:'2026-07-24T12:00:00.000Z' }))
+  mountInto('lib', 'library')
+  mountInto('main', 'folder')
+  // 自动演示:贴链接入队(留在首页看队列)→ 点队列行看直播
+  setTimeout(() => {
+    const url = document.querySelector('#main [data-url]')
+    if (url) { url.value = 'https://youtu.be/dQw4w9WgXcQ'; document.querySelector('#main [data-go]').click() }
+    setTimeout(() => { const row = document.querySelector('#main .bb-qrow'); if (row) row.click(); window.__READY = true }, 500)
+  }, 300)
+}).catch(e => { document.body.innerHTML = '<pre style="color:red">'+e.stack+'</pre>' })
+</script></body></html>
