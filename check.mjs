@@ -31,9 +31,16 @@ const anyAttr = (node, key) => { let hit = false; const walk = (n) => { if (n.at
 // ── 求值 main.js ──
 globalThis.__BLUEBIRD_TEST__ = {}
 const reg = { views: [], commands: [], settings: [], status: [] }
+// 语言广播垫片 = 宿主 pluginStore.subscribeLocale 的形状(返回退订函数);emitLocale() 手动播一次。
+const localeSubs = new Set()
+const emitLocale = () => { for (const f of Array.from(localeSubs)) f() }
 const ctx = {
   registerView: (v) => reg.views.push(v), registerCommand: (c) => reg.commands.push(c),
-  registerSetting: (s) => reg.settings.push(s), registerStatusItem: (s) => { reg.status.push(s); return { update() {}, dispose() {} } },
+  // 宿主同款:设置**同 key 覆盖**(pluginStore.registerSetting 先按 pluginId+key filter 再 append)
+  registerSetting: (s) => { reg.settings = reg.settings.filter((o) => o.key !== s.key); reg.settings.push(s) },
+  // 宿主同款:状态栏返回 update/dispose 句柄,update 原位改
+  registerStatusItem: (s) => { const item = { ...s }; reg.status.push(item); return { update: (p) => Object.assign(item, p), dispose: () => { item.disposed = true } } },
+  subscribeLocale: (cb) => { localeSubs.add(cb); return () => localeSubs.delete(cb) },
   notify() {}, activity: { log() {} }, openView() {},
   app: { notify() {}, writeFile: async () => {}, openFile() {}, readFile: async () => null },
 }
@@ -49,7 +56,8 @@ A.ok(reg.views.find((v) => v.id === 'folder' && typeof v.mount === 'function'), 
 A.ok(reg.views.find((v) => v.id === 'library' && typeof v.mount === 'function'), '应注册 library 视图(Space 引用它)')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-open'), '应注册 bluebird-open 命令')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-library'), '应注册 bluebird-library 命令')
-A.deepEqual(reg.settings.map((s) => s.key).sort(), ['defaultTemplate', 'detail'], '应声明两个设置(存储夹已改用宿主标准 workFolder)')
+A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail'], '应声明三个设置(存储夹已改用宿主标准 workFolder)')
+A.equal(localeSubs.size, 1, '顶层应订一次宿主语言广播(状态栏 + 设置项就地换语言)')
 
 // ── 工作文件夹约定(1.3.0):默认走宿主 workFolder;老宿主退回 videos;saveFolder 一次性迁移 ──
 A.equal(_ls.get('plugin.bluebird.workFolder'), 'myvids', '1.2.x 自定义 saveFolder 应迁移为 workFolder')
@@ -136,12 +144,15 @@ A.equal(T.toTXT([{ start: 65, end: 66, text: 'x' }], true), '[1:05] x')
 
 // ── 运行队列(1.4.0,照原版五态):node 无引擎 → 一路走到 error,验证泵/取消/清除的状态迁移 ──
 const q1 = T.qAdd('https://youtu.be/dQw4w9WgXcQ', '通用', 'standard')
-A.equal(q1.status, 'pending'); A.equal(q1.progressLabel, '排队中')
+A.equal(q1.status, 'pending'); A.equal(q1.progressKey, 'stQueued'); A.equal(T.qStageText(q1), '排队中')
 const q2 = T.qAdd('https://youtu.be/abc12345678', '通用', 'brief')
 T.qCancel(q2.id) // pending 时取消 → 直接标错,不会被泵拾起
 await new Promise((r) => setTimeout(r, 40))
-A.equal(q1.status, 'error', '无引擎环境应落 error'); A.ok(q1.error.includes('引擎'), q1.error)
-A.equal(q2.status, 'error'); A.equal(q2.error, '已取消')
+A.equal(q1.status, 'error', '无引擎环境应落 error'); A.equal(q1.errKey, 'errNoEngine'); A.ok(T.qErrText(q1).includes('引擎'), T.qErrText(q1))
+A.equal(q2.status, 'error'); A.equal(q2.errKey, 'canceled'); A.equal(T.qErrText(q2), '已取消')
+// 队列项存的必须是**键**不是渲染好的串(否则入队那一刻的语言会被永久冻住,见 1.5.1)
+A.equal(q1.error, '', '有词表键时不许再往 error 里塞成品串')
+A.equal(T.qErrText({ errKey: '', error: 'boom from engine' }), 'boom from engine', '引擎回的原始错误没有键 → 裸串照出')
 T.queue.items.push({ id: 'done1', status: 'completed' })
 T.qClearDone()
 A.ok(!T.queue.items.find((i) => i.id === 'done1'), '清除已完成应移除 completed 项')
@@ -149,9 +160,11 @@ A.ok(T.queue.items.find((i) => i.id === q1.id), '清除已完成不动 error 项
 T.qRemove(q1.id); T.qRemove(q2.id)
 A.equal(T.queue.items.length, 0, '移除后队列应清空')
 
-// 阶段映射:pct 单调有据 + 五态过程枚举(parsing/transcribing)
-A.deepEqual(T.stageOf({ type: 'status', payload: { state: 'queued' } }, ''), { pct: 10, label: '排队中', st: 'parsing' })
+// 阶段映射:pct 单调有据 + 五态过程枚举(parsing/transcribing);**返回键不返回串**(1.5.1)
+A.deepEqual(T.stageOf({ type: 'status', payload: { state: 'queued' } }, ''), { pct: 10, key: 'stQueued', st: 'parsing' })
+A.equal(T.stageText('stQueued'), '排队中', 'stageOf 的键渲染时才落地成当前语言')
 A.equal(T.stageOf({ type: 'tool_call', payload: { name: 'run_bash' } }, '').st, 'transcribing')
+A.equal(T.stageText('stgTool', { name: '' }), '调用 工具', '工具名缺失时的兜底词也得跟着语言走,不许在采集时冻住')
 A.equal(T.stageOf({ type: 'token', payload: {} }, 'x'.repeat(60000)).pct, 92, 'token 阶段封顶 92')
 A.equal(T.STEPS.length, 5, '步骤路标五段')
 
@@ -172,5 +185,113 @@ const wN = writes.length
 await T.ensureWorkFolder()
 A.equal(writes.length, wN, '已有索引不重复写(幂等)')
 
+// ── 双语(1.5.0)①词表:两侧键集合必须完全相等;en 侧不许留中文;占位符两侧对齐 ──
+const zhKeys = Object.keys(T.MSG.zh).sort(), enKeys = Object.keys(T.MSG.en).sort()
+A.deepEqual(enKeys, zhKeys, 'MSG.zh 与 MSG.en 的键集合必须完全相等(漏翻一条就红)')
+const CJK_RE = /[一-鿿]/
+const phOf = (s) => (String(s).match(/\{[a-zA-Z]+\}/g) || []).sort().join(',')
+for (const k of zhKeys) {
+  A.ok(String(T.MSG.zh[k]).length > 0 && String(T.MSG.en[k]).length > 0, `MSG.${k} 两侧都不许是空串`)
+  A.ok(!CJK_RE.test(String(T.MSG.en[k])), `MSG.en.${k} 里还有中文:${T.MSG.en[k]}`)
+  A.equal(phOf(T.MSG.en[k]), phOf(T.MSG.zh[k]), `MSG.${k} 两侧的 {占位符} 不一致`)
+}
+
+// ── 双语 ②切 en:渲染层真的吐英文(mock ctx 的 getLocale 就是宿主那个接缝) ──
+// 先在中文界面下灌一条**已存在**的失败队列项:切语言后它必须跟着换语言(1.5.1 回归闸;
+// 此前 error/progressLabel 存的是入库那一刻渲染好的串 → 英文界面里永久残留「请先登录 Forsion」)
+const stale = T.qAdd('https://youtu.be/dQw4w9WgXcQ', '通用', 'standard')
+await new Promise((r) => setTimeout(r, 40))
+A.equal(T.qErrText(stale), '未连接到 Tangu 引擎', '入队时应是中文')
+ctx.getLocale = () => 'en'
+A.equal(T.qErrText(stale), 'Not connected to the Tangu engine', '**已在队列里**的旧错误项必须跟着切语言')
+A.equal(T.qStageText(stale), 'Queued', '**已在队列里**的旧阶段文案必须跟着切语言')
+T.qRemove(stale.id)
+A.equal(T.L(), 'en', 'L() 应现读 ctx.getLocale,不缓存')
+// 语言广播:状态栏就地更新;设置项同 key 重注册(宿主是覆盖不是 append,所以不许长出重复行)
+emitLocale()
+A.equal(reg.status[0].text, '🐦 Bluebird', '状态栏项应经 update() 就地换成英文')
+A.equal(reg.status[0].title, 'Open Bluebird')
+A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
+A.equal(reg.settings[0].label, 'Default summary template', '设置项标签应跟着切语言(宿主 registerSetting 同 key 覆盖)')
+A.equal(reg.settings[1].label, 'Default detail level (brief/standard/detailed)')
+A.equal(reg.settings[2].label, 'Enhanced auto mode')
+
+// ── 增强自动模式:开关必须落进 vault 镜像文件 ───────────────────────────────
+// 引擎进程里的「青鸟链接收藏」技能读不到渲染进程的 localStorage,只能读这个文件。
+{
+  const before = writes.length
+  A.equal(await T.mirrorLinkMode(), false, '值没变不该重复落盘(30s 轮询不许每跳都写)')
+  _ls.set('plugin.bluebird.autoSave', 'true')
+  A.equal(await T.mirrorLinkMode(), true, '开关翻开必须写镜像文件')
+  A.deepEqual(JSON.parse(V.get(T.MODE_FILE)), { autoSave: true }, '镜像内容 = {autoSave:true}')
+  _ls.set('plugin.bluebird.autoSave', 'false')
+  await T.mirrorLinkMode()
+  A.deepEqual(JSON.parse(V.get(T.MODE_FILE)), { autoSave: false }, '关掉必须回写 false —— 留着 true 会让技能一直自动存')
+  A.equal(writes.length, before + 2, '两次真变更 = 两次落盘')
+  // 关着 + 库里没有这个文件(例:切到一个没用过本功能的库)→ 不许凭空造
+  _ls.set('plugin.bluebird.autoSave', 'true'); await T.mirrorLinkMode()
+  V.delete(T.MODE_FILE)
+  _ls.set('plugin.bluebird.autoSave', 'false')
+  A.equal(await T.mirrorLinkMode(), false, '关着且库里没有该文件 → 不许凭空造(没用过本功能的库应保持干净)')
+  A.equal(V.has(T.MODE_FILE), false, '上一条不许顺手写出文件')
+}
+A.equal(T.t('queueTitle'), 'Analysis queue', 'en 下 t() 应给英文串')
+A.equal(T.badge('xiaohongshu').textContent, 'Xiaohongshu', 'en 下平台徽标(真 DOM 节点)应渲染英文')
+A.equal(T.wordState(100, 'brief'), 'Too short', 'en 下字数横幅应是英文')
+A.equal(T.stageText(T.stageOf({ type: 'status', payload: { state: 'queued' } }, '').key), 'Queued', 'en 下进度阶段文案应是英文')
+A.equal(T.stageText('stgTool', { name: '' }), 'Running tool', 'en 下工具名兜底也应是英文')
+A.equal(T.tplLabel('学术'), 'Academic', 'en 下模板显示名是英文,而值仍是中文 canonical')
+A.equal(T.detailLabel('detailed'), 'Detailed', 'en 下详细度显示名应是英文')
+A.equal(T.deriveTitle(''), 'Video summary', 'en 下产出标题兜底应是英文')
+A.equal(T.t('hintCountOne', { n: 1 }), ' · 1 segment', 'en 下 1 条字幕要用单数(不许硬拼 "1 segments")')
+A.ok(!/[＋]/.test(T.MSG.en.libNew + T.MSG.en.libAddFolder), 'en 侧不许用全角＋(在拉丁文本里撑一格)')
+const enQ = T.qAdd('https://youtu.be/dQw4w9WgXcQ', '通用', 'brief')
+A.equal(T.qStageText(enQ), 'Queued', 'en 下新入队项的阶段文案应是英文')
+await new Promise((r) => setTimeout(r, 40))
+A.equal(T.qErrText(enQ), 'Not connected to the Tangu engine', 'en 下队列错误文案应是英文')
+T.qRemove(enQ.id)
+A.equal(T.queue.items.length, 0)
+
+// ── 双语 ②′ 切语言重画不许吞掉用户正在编辑的现场(1.5.1 回归闸:repaint 整树重建前后搬运) ──
+// QA 记录只活在 DOM 里(没有 state 备份),抹了就是真丢 —— 所以这里断言的是节点**同一性**。
+const snapHome = T.snapshotStage({ querySelector: (s) => ({
+  '[data-url]': { value: 'https://www.bilibili.com/video/BV1xx411c7mD' },
+  '[data-tpl]': { value: '学术' }, '[data-detail]': { value: 'detailed' },
+}[s] || null) }, 'home')
+const freshHome = { '[data-url]': { value: '' }, '[data-tpl]': { value: '通用' }, '[data-detail]': { value: 'standard' } }
+T.restoreStage({ querySelector: (s) => freshHome[s] || null }, snapHome)
+A.equal(freshHome['[data-url]'].value, 'https://www.bilibili.com/video/BV1xx411c7mD', '切语言不许吞掉刚粘的链接')
+A.equal(freshHome['[data-tpl]'].value, '学术', '切语言不许把模板打回默认')
+A.equal(freshHome['[data-detail]'].value, 'detailed', '切语言不许把详细度打回默认')
+const qaAsk = { m: 'q1' }, qaAns = { m: 'a1' }
+const snapDetail = T.snapshotStage({ querySelector: (s) => ({
+  '[data-qalog]': { children: [qaAsk, qaAns] }, '[data-qin]': { value: '正在打字的下一个问题' },
+}[s] || null) }, 'detail')
+const freshLog = { children: [], appendChild(n) { this.children.push(n) } }
+const freshQin = { value: '' }
+T.restoreStage({ querySelector: (s) => (s === '[data-qalog]' ? freshLog : s === '[data-qin]' ? freshQin : null) }, snapDetail)
+A.equal(freshLog.children.length, 2, '切语言必须把整段 QA 记录搬过去')
+A.equal(freshLog.children[0], qaAsk, '搬的应是原节点本身(不是复制,时间戳 handler 才还能用)')
+A.equal(freshLog.children[1], qaAns)
+A.equal(freshQin.value, '正在打字的下一个问题', '切语言不许吞掉还没发出去的那句提问')
+// 纯函数绿了但调用点被删掉,用户照样丢内容 → 连调用点一起钉住(node 里挂不起真视图,只能盯源码)
+const repaintSrc = /function repaint\(\) \{[\s\S]*?\n  \}/.exec(src)
+A.ok(repaintSrc, '应能定位到 repaint()')
+A.ok(/snapshotStage\(/.test(repaintSrc[0]) && /restoreStage\(/.test(repaintSrc[0]), 'repaint() 必须先快照现场再回填,不许整树重建了事')
+A.ok(!/progressLabel/.test(src), '队列项不许再存渲染好的阶段串(progressLabel):存 progressKey,渲染时才 t()')
+
+// ── 双语 ③切回中文:中文界面必须原样还在(不许为了过门禁把中文串删掉了事) ──
+ctx.getLocale = () => 'zh'
+A.equal(T.badge('xiaohongshu').textContent, '小红书', '切回 zh 后中文界面必须原样还在')
+A.equal(T.wordState(100, 'brief'), '字数偏少')
+A.equal(T.tplLabel('学术'), '学术')
+delete ctx.getLocale
+A.equal(T.L(), 'zh', '旧宿主(无 getLocale)必须回退中文 canonical')
+A.equal(T.t('queueTitle'), '分析队列')
+
+// ── 停用即收干净:顶层语言订阅 + 状态栏项(此前 mock 没有 subscribeLocale,那几行退订代码从没被执行过) ──
+A.equal(localeSubs.size, 1, 'dispose 前应还挂着顶层语言订阅')
 dispose()
-console.log(`check ok — ${reg.views.length} views / ${reg.commands.length} cmds / ${reg.settings.length} settings;XSS+平台+导出+队列状态机+建夹 断言通过`)
+A.equal(localeSubs.size, 0, 'dispose() 必须退掉顶层语言订阅(否则插件停用后还在改状态栏/设置)')
+A.ok(reg.status[0].disposed, 'dispose() 必须收掉状态栏项')
+console.log(`check ok — ${reg.views.length} views / ${reg.commands.length} cmds / ${reg.settings.length} settings;XSS+平台+导出+队列状态机+建夹+双语(${zhKeys.length} 键 ×2)+切语言保现场断言通过`)

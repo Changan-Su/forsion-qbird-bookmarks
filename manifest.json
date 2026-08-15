@@ -1,12 +1,14 @@
 {
   "id": "bluebird",
   "name": "青鸟收藏夹",
-  "version": "1.4.1",
+  "nameEn": "Bluebird",
+  "version": "1.6.0",
   "apiVersion": 1,
-  "description": "视频内容分析:贴一条 Bilibili / YouTube / 抖音 / 小红书 链接,在工作台里抓字幕、出结构化 Markdown 总结,分析完自动存进 Amadeus 笔记库。转录与 AI 全走本机 Tangu(「青鸟收藏夹」Agent + 「青鸟视频分析」技能,基于 yt-dlp,总结由 Tangu 直连 Forsion 完成),数据不出本机。",
+  "description": "视频内容分析:贴一条 Bilibili / YouTube / 抖音 / 小红书 链接,在工作台里抓字幕、出结构化 Markdown 总结,分析完自动存进 Amadeus 笔记库。转录与 AI 全走本机 Tangu(「青鸟收藏夹」Agent + 「青鸟视频分析」技能,基于 yt-dlp,总结由 Tangu 直连 Forsion 完成),数据不出本机。文章、文档这类普通链接不必开工作台:在任意 Tangu 对话里丢过去说一句「存一下」,「青鸟链接收藏」技能就会抓正文、写成笔记存进库里的 Links/。",
+  "descriptionEn": "Video analysis for your notes: paste a Bilibili / YouTube / Douyin / Xiaohongshu link, and Bluebird pulls the transcript, writes a structured Markdown summary in the workbench, and files it in your Amadeus vault. Transcription and AI both run through Tangu on this machine (the Bluebird agent plus its Bluebird Video Analysis skill, built on yt-dlp; the summary goes straight from Tangu to Forsion), so the data never leaves your computer. Ordinary links — articles, docs, papers — skip the workbench entirely: drop one into any Tangu chat with \"save this\" and the Bluebird Link Capture skill fetches the page, writes a note and files it under Links/ in your vault. It confirms first by default; turn on \"Enhanced auto mode\" in this page's settings and a link sent on its own is filed straight away.",
   "main": "main.js",
   "onboarding": {
-    "intro": "青鸟收藏夹是一个工作台视图,把视频链接变成可读可检索的笔记。配套的「青鸟收藏夹」Agent 与「青鸟视频分析」技能已内嵌在本捆绑包里,引擎启动时自动就位,无需另装。",
+    "intro": "青鸟收藏夹是一个工作台视图,把视频链接变成可读可检索的笔记。配套的「青鸟收藏夹」Agent 与「青鸟视频分析」技能已内嵌在本捆绑包里,引擎启动时自动就位,无需另装。另带一个「青鸟链接收藏」技能:在**任意** Tangu 对话里丢一条文章/文档链接说「存一下」,就会抓正文、写成笔记存进库里的 Links/。默认会先确认一句;本页设置里打开「增强自动模式」后,单独发一条链接就直接存,不再问。",
     "steps": [
       {
         "title": "转录依赖",
@@ -17,6 +19,19 @@
         "description": "命令面板「青鸟收藏夹:打开」开视图;贴链接(或整段分享文案)加入分析队列,可连贴多条排队跑,点队列行看直播进度;分析完自动存为 Markdown 笔记,落在插件的「工作文件夹」(默认「青鸟收藏夹」,首次打开即在库里建好,插件设置里可改),点「打开笔记」直达。"
       }
     ],
+    "en": {
+      "intro": "Bluebird is a workbench view that turns a video link into a note you can read and search. The bundled Bluebird agent and its Bluebird Video Analysis skill ship inside this package and are seeded when the engine starts — nothing else to install. A second skill, Bluebird Link Capture, works in **any** Tangu conversation: drop an article or doc link and say \"save this\", and it fetches the page, writes a note and files it under Links/ in your vault.",
+      "steps": [
+        {
+          "title": "Transcription requirements",
+          "description": "Transcripts come from the open-source yt-dlp, so the environment running Tangu needs to be able to pip install it. Videos without subtitles have their audio extracted, which also needs ffmpeg on the system. Speech recognition uses whatever Forsion is already set to (Settings → Voice: local offline model / your own provider key / Forsion cloud), so this plugin never asks for a separate ASR key."
+        },
+        {
+          "title": "Getting started",
+          "description": "Open the view from the command palette (\"Bluebird: Open\"), then paste a link — or a whole block of share text — to add it to the analysis queue. Queue several at once and click any row to watch it live. Finished analyses are saved as Markdown notes in the plugin work folder, which is created in your vault the first time you open the view and can be renamed in the plugin settings; \"Open note\" jumps straight to it."
+        }
+      ]
+    },
     "settings": true
   }
 }

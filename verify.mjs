@@ -21,7 +21,8 @@ const bad = (m) => { fail += 1; console.log(`  ❌ ${m}`) }
 const lsDirs = (p) => (existsSync(p) ? readdirSync(p).filter((x) => !x.startsWith('.')) : [])
 
 // 引擎真实内置工具名(与 20260717/validate.mjs 的 TOOLS 同源)
-const TOOLS = new Set(['add_muse_todo', 'apply_patch', 'ask_user', 'browser_back', 'browser_click', 'browser_console',
+const TOOLS = new Set(['add_muse_todo', 'amadeus_list_notes', 'amadeus_read_note', 'amadeus_write_note',
+  'apply_patch', 'ask_user', 'browser_back', 'browser_click', 'browser_console',
   'browser_navigate', 'browser_press', 'browser_screenshot', 'browser_scroll', 'browser_search', 'browser_snapshot',
   'browser_task', 'browser_type', 'calculator', 'delegate', 'display_file', 'exit_plan_mode', 'generate_image',
   'get_datetime', 'glob_files', 'inbox_send', 'kill_process', 'list_files', 'list_processes', 'log_event',
@@ -60,26 +61,32 @@ console.log('\n== Bundle ==')
   errs.length ? bad(errs.join(';')) : ok('bundle 布局(manifest 在根;agents/spaces 标志齐全;无旧布局残留)')
 }
 
-/* ── Skill(agents/<slug>/skills/<slug>/SKILL.md,tangu-agent localSkills 契约;随 agent 播种为 agent 级技能) ── */
+/* ── Skill(SKILL.md,tangu-agent localSkills 契约)。两处作用域,同一套契约:
+ *   agents/<slug>/skills/<id>/  = agent 级(随 agent 播种,只有该 agent 看得见)
+ *   skills/<id>/                = bundle 级(bundleSkillRoots 原地读,所有 agent 都看得见) ── */
 console.log('\n== Skill ==')
-for (const a of lsDirs(path.join(ROOT, 'agents'))) {
-  for (const d of lsDirs(path.join(ROOT, 'agents', a, 'skills'))) {
-    try {
-      const raw = readFileSync(path.join(ROOT, 'agents', a, 'skills', d, 'SKILL.md'), 'utf8')
-      const { meta, body } = parseFrontmatter(raw)
-      const errs = []
-      if (!SLUG.test(d)) errs.push('slug 不合法')
-      if (!meta.name) errs.push('frontmatter 缺 name')
-      if (!meta.description || meta.description.length < 15) errs.push('description 缺失或太短')
-      if (raw.split('\n').length < 50) errs.push('正文太薄(<50 行)')
-      if (!/^##\s/m.test(body)) errs.push('正文无 ## 分节')
-      // snake_case 词默认按「工具名」查,但技能正文里也会出现数据字段名/环境变量。
-      // 白名单只收本技能自定协议里的字段,别拿它掩盖真的编造工具名。
-      const DATA_FIELDS = new Set(['needs_asr', 'audio_path'])
-      for (const t of new Set(body.match(/\b[a-z]+(?:_[a-z]+)+\b/g) || []))
-        if (!TOOLS.has(t) && !DATA_FIELDS.has(t)) errs.push(`疑似编造工具名 "${t}"`)
-      errs.length ? bad(`${a}/${d}: ${errs.join(';')}`) : ok(`${a}/${d}(${meta.name}, ${raw.split('\n').length} 行)`)
-    } catch (e) { bad(`${a}/${d}: ${e.message}`) }
+{
+  const scopes = [['bundle', path.join(ROOT, 'skills')]]
+  for (const a of lsDirs(path.join(ROOT, 'agents'))) scopes.push([a, path.join(ROOT, 'agents', a, 'skills')])
+  for (const [label, base] of scopes) {
+    for (const d of lsDirs(base)) {
+      try {
+        const raw = readFileSync(path.join(base, d, 'SKILL.md'), 'utf8')
+        const { meta, body } = parseFrontmatter(raw)
+        const errs = []
+        if (!SLUG.test(d)) errs.push('slug 不合法')
+        if (!meta.name) errs.push('frontmatter 缺 name')
+        if (!meta.description || meta.description.length < 15) errs.push('description 缺失或太短')
+        if (raw.split('\n').length < 50) errs.push('正文太薄(<50 行)')
+        if (!/^##\s/m.test(body)) errs.push('正文无 ## 分节')
+        // snake_case 词默认按「工具名」查,但技能正文里也会出现数据字段名/环境变量。
+        // 白名单只收本技能自定协议里的字段,别拿它掩盖真的编造工具名。
+        const DATA_FIELDS = new Set(['needs_asr', 'audio_path'])
+        for (const t of new Set(body.match(/\b[a-z]+(?:_[a-z]+)+\b/g) || []))
+          if (!TOOLS.has(t) && !DATA_FIELDS.has(t)) errs.push(`疑似编造工具名 "${t}"`)
+        errs.length ? bad(`${label}/${d}: ${errs.join(';')}`) : ok(`${label}/${d}(${meta.name}, ${raw.split('\n').length} 行)`)
+      } catch (e) { bad(`${label}/${d}: ${e.message}`) }
+    }
   }
 }
 

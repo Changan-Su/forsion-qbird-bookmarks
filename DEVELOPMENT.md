@@ -30,6 +30,7 @@ Amadeus 笔记(videos/{日期}-{标题}.md)
 | 插件(manifest + main.js) | 根 | 工作台视图:输入链接、直播总结、存笔记。驱动 Tangu,自身不碰 Python/网络抓取。 |
 | Tangu 文件夹 Agent `bluebird` | `agents/bluebird/` | 引擎侧智能体,视图靠 `agent_config.agentSlug` 选它;串起转录→总结→问答。`full-auto`(host run_bash 无人值守),run_bash 用途死限在「跑转录脚本 + 装 yt-dlp」。引擎启动/重扫时**播种一次**到 `tangu/agents/`(bundles.ts),已存在永不覆盖。 |
 | 技能 + Python | `agents/bluebird/skills/bluebird-video/` | 转录工作流(host 模式 `run_bash` 跑 `scripts/transcribe.py`)+ 10 套总结模板 + 问答/翻译规则,agent 级随播种就位。 |
+| 技能(链接收藏) | `skills/bluebird-link/` | **bundle 级作用域**:引擎 `bundleSkillRoots()` 原地读 `plugins/<id>/skills/`,不播种、所有 agent 都列得到(优先级 内置 < bundle < 用户)。所以「日常对话里丢个链接就入库」这件事必须放这儿——放 `agents/bluebird/skills/` 只有青鸟 agent 看得见。纯提示词,无脚本。 |
 | Space | `spaces/bluebird/` | 工作台一键布局;desktop spaces:list 汇入,随插件启停显隐。 |
 
 ### 为什么转录用 run_bash 而不是 run_python
