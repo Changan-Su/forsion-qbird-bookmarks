@@ -183,18 +183,125 @@ def download_audio(url, work_dir, headers):
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         "postprocessor_args": {"extractaudio": ["-ar", "16000", "-ac", "1"]},
         "http_headers": headers,
+        # 转 wav 后别删原件:那份压缩音频才是要存进收藏夹的(wav 是 16k 单声道降质版,一小时 100MB+)
+        "keepvideo": True,
     }
     with YoutubeDL(opts) as ydl:
         ydl.extract_info(url, download=True)
     audio = work_dir / "audio.wav"
     if not audio.exists():
-        for item in work_dir.iterdir():
+        for item in sorted(work_dir.iterdir()):
+            # keepvideo 之后目录里有两份,这里挑的是**喂语音识别**的那份:wav 优先
             if item.suffix.lower() in (".wav", ".mp3", ".m4a", ".opus", ".webm", ".ogg"):
                 audio = item
-                break
+                if item.suffix.lower() == ".wav":
+                    break
     if not audio.exists():
         raise RuntimeError("音频下载成功但找不到文件(ffmpeg 是否可用?)")
     return audio
+
+
+# ── 存档:把素材落进收藏夹(--save-to,给的是绝对目录) ─────────────────────────
+
+AUDIO_EXTS = (".wav", ".mp3", ".m4a", ".opus", ".webm", ".ogg", ".aac", ".flac")
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+CONTENT_TYPE_EXT = {
+    "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+    "image/gif": ".gif", "image/avif": ".avif", "image/bmp": ".bmp",
+}
+
+
+def safe_stem(text):
+    """文件名词干:id 来自 yt-dlp,字符集不由我们说了算 —— 一个 `/` 就是一次目录穿越。"""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", str(text or "")).strip("_")
+    return cleaned[:60] or "item"
+
+
+def image_ext(content_type, url):
+    """扩展名决定 Amadeus 认不认它是图(IMG_EXT_RE),所以优先信 Content-Type,再退 URL 后缀。"""
+    ext = CONTENT_TYPE_EXT.get(str(content_type or "").split(";")[0].strip().lower())
+    if ext:
+        return ext
+    m = re.search(r"\.(jpe?g|png|webp|gif|avif|bmp)(?:[?!#]|$)", str(url or ""), re.I)
+    return ("." + m.group(1).lower().replace("jpeg", "jpg")) if m else ".jpg"
+
+
+def pick_archive_audio(names):
+    """keepvideo 之后 work_dir 里有两份:转好的 audio.wav(给语音识别)和原始压缩音频(给存档)。
+    存档要的是**非 wav 的那份** —— wav 是 16k 单声道的降质版,一小时能有 100MB+。"""
+    for name in sorted(names):
+        low = name.lower()
+        if low.endswith(".wav"):
+            continue
+        if low.endswith(AUDIO_EXTS) or low.endswith((".mp4", ".m4v", ".mov")):
+            return name
+    return None
+
+
+def download_images(urls, save_dir, stem, headers):
+    """图片逐张下,**一张挂掉不许拖垮整条**(帖子里少一张图 ≫ 整篇剪藏失败)。回落盘的文件名。"""
+    out = []
+    save_dir.mkdir(parents=True, exist_ok=True)
+    for idx, url in enumerate(urls, 1):
+        try:
+            hdrs = dict(headers)
+            if "xhscdn" in url or "xiaohongshu" in url:
+                hdrs.setdefault("Referer", "https://www.xiaohongshu.com/")
+            req = urllib.request.Request(url, headers=hdrs)
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                blob = resp.read(MAX_IMAGE_BYTES + 1)
+                ctype = resp.headers.get("Content-Type", "")
+            if not blob or len(blob) > MAX_IMAGE_BYTES:
+                continue
+            name = "%s-%02d%s" % (stem, idx, image_ext(ctype, url))
+            (save_dir / name).write_bytes(blob)
+            out.append(name)
+        except Exception as exc:
+            print("图片 %d 存档失败(跳过):%s" % (idx, exc), file=sys.stderr)
+    return out
+
+
+# ── 图文帖(小红书笔记这类没有音轨的帖子) ────────────────────────────────────
+
+# yt-dlp 对图文帖常直接抛而不是回一个「没有流」的 info,这两句是它的形态(照搬 xiaohongshu_extractor 的实战判据)
+IMAGE_POST_ERRORS = ("no video formats", "unable to extract")
+
+
+def is_image_post_error(exc):
+    msg = str(exc).lower()
+    return any(k in msg for k in IMAGE_POST_ERRORS)
+
+
+def dedupe_thumbnails(info):
+    """yt-dlp 对同一张图会回多条(urlDefault / urlPre 各一)。
+    去掉 `?` 查询串与 CDN 的 `!变换后缀`,拿最后一段路径当键去重。"""
+    seen, out = set(), []
+    for t in (info.get("thumbnails") or []):
+        if not isinstance(t, dict) or not t.get("url"):
+            continue
+        url = t["url"]
+        base = url.split("?")[0].split("!")[0]
+        key = base.split("/")[-1] if "/" in base else base
+        if key not in seen:
+            seen.add(key)
+            out.append(url)
+    return out
+
+
+def image_post_result(info, fallback_url, save_dir=None, headers=None):
+    """图文帖:图 + 正文就是全部内容,没有音轨可转写。"""
+    images = dedupe_thumbnails(info)
+    meta = build_meta(info, fallback_url)
+    meta["images"] = images
+    if not meta["thumbnail"] and images:
+        meta["thumbnail"] = images[0]          # 侧栏/详情的封面位照常有东西可显
+    out = {"ok": True, "source": "image_text", "meta": meta,
+           "text": str(info.get("description") or "").strip(),
+           "note": "图文帖:没有音轨,图片与正文已抓好,不需要转写"}
+    if save_dir and images:
+        out["assets"] = download_images(images, Path(save_dir),
+                                        "bluebird-" + safe_stem(meta.get("videoId")), headers or {})
+    return out
 
 
 def build_meta(info, fallback_url):
@@ -208,7 +315,7 @@ def build_meta(info, fallback_url):
     }
 
 
-def run(url):
+def run(url, save_to=None):
     from yt_dlp import YoutubeDL
     langs = [s.strip() for s in os.environ.get(
         "BLUEBIRD_LANGS", "zh-Hans,zh-CN,zh,en,en-US").split(",") if s.strip()]
@@ -216,22 +323,66 @@ def run(url):
     if os.environ.get("BLUEBIRD_COOKIE", "").strip():
         headers["Cookie"] = os.environ["BLUEBIRD_COOKIE"].strip()
     work_dir = Path(tempfile.mkdtemp(prefix="bluebird_"))
+    probe_opts = {"quiet": True, "noprogress": True, "noplaylist": True,
+                  "http_headers": headers, "skip_download": True,
+                  # 图文帖没有流,不加这个 flag yt-dlp 直接抛 `No video formats found` ——
+                  # 加上则退成 warning 并照常回 info(缩略图/正文/时长都在)。web 版一直有,原生化时漏了。
+                  "ignore_no_formats_error": True}
     try:
-        with YoutubeDL({"quiet": True, "noprogress": True, "noplaylist": True,
-                        "http_headers": headers, "skip_download": True}) as ydl:
-            info = ydl.extract_info(url, download=False)
+        try:
+            with YoutubeDL(probe_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as exc:
+            # 图文帖没有视频流,yt-dlp 常在这一步就抛 —— 退成不解析流的元数据抽取
+            if not is_image_post_error(exc):
+                raise
+            with YoutubeDL(probe_opts) as ydl:
+                info = ydl.extract_info(url, download=False, process=False)
+            return image_post_result(info, url, save_to, headers)
         meta = build_meta(info, url)
         segments, lang = extract_subtitles(info, work_dir, langs, headers)
         if segments:
             return {"ok": True, "source": "native", "lang": lang, "meta": meta,
                     "text": "\n".join(s["text"] for s in segments), "segments": segments}
 
+        # 图文帖:时长 0 且确有图/正文。附加条件是防线 —— 光看 duration==0 会把「元数据缺时长的视频」
+        # 误判成图文帖,那样会静默交出一份没有内容的空卡。
+        if int(info.get("duration") or 0) == 0 and (dedupe_thumbnails(info) or info.get("description")):
+            return image_post_result(info, url, save_to, headers)
+        # 有时长却没有任何流 = 地区限制/已删/需登录,不是图文帖。ignore_no_formats_error 让它也回 info
+        # 而不是抛,所以这里得自己拦 —— 掉进下面去下音频只会得到一句难懂的 ffmpeg 报错。
+        if not (info.get("formats") or info.get("url")):
+            raise RuntimeError("这条内容没有可下载的音视频流(常见:地区限制 / 已删除 / 需登录),也不是图文帖")
+
         # 无字幕:只把音频备好交出去,转写归 Forsion 的语音链路(见文件头)。
-        audio = download_audio(url, work_dir, headers)
-        keep = Path(tempfile.gettempdir()) / f"bluebird-asr-{meta.get('videoId') or 'audio'}.wav"
+        try:
+            audio = download_audio(url, work_dir, headers)
+        except Exception as exc:
+            # 上面 duration 闸没拦住的图文帖会在这里现形(帖子报了假的流)
+            if not is_image_post_error(exc):
+                raise
+            return image_post_result(info, url, save_to, headers)
+        # 存档在搬走 wav 之前做:原始压缩音频还躺在 work_dir 里,finally 会把整个目录删掉
+        assets = []
+        if save_to:
+            src = pick_archive_audio([i.name for i in work_dir.iterdir() if i.is_file()])
+            if src:
+                dest_dir = Path(save_to)
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                name = "bluebird-%s%s" % (safe_stem(meta.get("videoId")), Path(src).suffix.lower())
+                try:
+                    shutil.copy2(str(work_dir / src), str(dest_dir / name))
+                    assets.append(name)
+                except Exception as exc:
+                    print("音频存档失败(不影响转写):%s" % exc, file=sys.stderr)
+
+        keep = Path(tempfile.gettempdir()) / f"bluebird-asr-{safe_stem(meta.get('videoId')) or 'audio'}.wav"
         shutil.move(str(audio), str(keep))  # 必须搬出 work_dir —— finally 会把它整个删掉
-        return {"ok": True, "source": "needs_asr", "meta": meta, "audio_path": str(keep),
-                "note": "无原生字幕;音频已转 16kHz 单声道 WAV,待宿主用 Forsion 语音识别转写"}
+        out = {"ok": True, "source": "needs_asr", "meta": meta, "audio_path": str(keep),
+               "note": "无原生字幕;音频已转 16kHz 单声道 WAV,待宿主用 Forsion 语音识别转写"}
+        if assets:
+            out["assets"] = assets
+        return out
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)  # 清理临时字幕/音频目录(Codex #9)
 
@@ -254,7 +405,66 @@ def selftest():
     src = Path(__file__).read_text(encoding="utf-8")
     for banned in ("QWEN3" + "_ASR", "dash" + "scope", "transcribe_by" + "_asr"):
         assert banned not in src, f"脚本不该再自带 ASR 供应商,却出现了 {banned}"
+    # 图文帖:同一张图 yt-dlp 回两条(urlDefault/urlPre),去重后只剩一条
+    info_img = {
+        "id": "abc", "title": "一篇图文", "duration": 0,
+        "description": "正文第一段\n正文第二段",
+        "thumbnails": [
+            {"url": "https://sns.xhscdn.com/x/aaa.jpg?imageView2/2/w/540"},
+            {"url": "https://sns.xhscdn.com/x/aaa.jpg!nd_dft_wlteh_webp_3"},
+            {"url": "https://sns.xhscdn.com/x/bbb.jpg?sign=1"},
+        ],
+    }
+    assert dedupe_thumbnails(info_img) == [
+        "https://sns.xhscdn.com/x/aaa.jpg?imageView2/2/w/540",
+        "https://sns.xhscdn.com/x/bbb.jpg?sign=1",
+    ], dedupe_thumbnails(info_img)
+    assert dedupe_thumbnails({}) == []
+    r = image_post_result(info_img, "https://www.xiaohongshu.com/explore/x")
+    assert r["source"] == "image_text" and len(r["meta"]["images"]) == 2, r
+    assert r["meta"]["thumbnail"] == r["meta"]["images"][0], "封面位没图时应退回第一张图"
+    assert r["text"] == "正文第一段\n正文第二段", r["text"]
+    # 已有 thumbnail 就别顶掉
+    keep = image_post_result({**info_img, "thumbnail": "https://x/cover.jpg"}, "u")
+    assert keep["meta"]["thumbnail"] == "https://x/cover.jpg"
+    # 存档件的命名与挑选
+    assert safe_stem("BV1xx/../../etc") == "BV1xx_______etc", safe_stem("BV1xx/../../etc")
+    assert safe_stem("") == "item" and safe_stem("!!!") == "item"
+    assert image_ext("image/webp; charset=x", "https://x/a.jpg") == ".webp", "Content-Type 优先"
+    assert image_ext("", "https://x/a.JPEG?sign=1") == ".jpg"
+    assert image_ext("", "https://x/a.png!nd_dft") == ".png"
+    assert image_ext("text/html", "https://x/a") == ".jpg", "都认不出时退 .jpg"
+    # keepvideo 之后两份并存:存档要非 wav 的那份
+    assert pick_archive_audio(["audio.wav", "audio.m4a"]) == "audio.m4a"
+    assert pick_archive_audio(["audio.wav"]) is None, "只有降质 wav 时不存档"
+    assert pick_archive_audio(["audio.wav", "audio.sub.vtt"]) is None
+    assert pick_archive_audio([]) is None
+    # 参数解析:路径带空格必须完整拿到
+    assert parse_args(["https://x/a", "--save-to", "/Users/a b/收藏夹/assets"]) == ("https://x/a", "/Users/a b/收藏夹/assets")
+    assert parse_args(["--save-to=/tmp/x", "https://x/a"]) == ("https://x/a", "/tmp/x")
+    assert parse_args(["https://x/a"]) == ("https://x/a", None)
+    # 有时长但没有流 ≠ 图文帖(ignore_no_formats_error 之后它也会回 info,不能当图文处理)
+    assert not (int({"duration": 300, "formats": []}.get("duration") or 0) == 0), "有时长就不该进图文档"
+    assert is_image_post_error(Exception("ERROR: No video formats found!"))
+    assert is_image_post_error(Exception("Unable to extract initial state"))
+    assert not is_image_post_error(Exception("HTTP Error 404: Not Found"))
     print("selftest ok")
+
+
+def parse_args(argv):
+    """→ (url, save_to)。`--save-to <绝对目录>` 缺省 None = 只抓不存(TUI 里直接调本脚本时的形态)。"""
+    url, save_to, i = None, None, 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--save-to":
+            i += 1
+            save_to = argv[i] if i < len(argv) else None
+        elif a.startswith("--save-to="):
+            save_to = a.split("=", 1)[1]
+        elif url is None:
+            url = a
+        i += 1
+    return url, (save_to or None)
 
 
 def main():
@@ -262,9 +472,10 @@ def main():
     if args and args[0] == "--selftest":
         selftest()
         return
-    if not args or not args[0].strip():
-        raise ValueError("用法: python transcribe.py <video_url>")
-    print(json.dumps(run(args[0].strip()), ensure_ascii=False))
+    url, save_to = parse_args(args)
+    if not url or not url.strip():
+        raise ValueError('用法: python transcribe.py <video_url> [--save-to "<绝对目录>"]')
+    print(json.dumps(run(url.strip(), save_to), ensure_ascii=False))
 
 
 if __name__ == "__main__":

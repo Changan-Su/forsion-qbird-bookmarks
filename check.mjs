@@ -34,6 +34,8 @@ const reg = { views: [], commands: [], settings: [], status: [] }
 // 语言广播垫片 = 宿主 pluginStore.subscribeLocale 的形状(返回退订函数);emitLocale() 手动播一次。
 const localeSubs = new Set()
 const emitLocale = () => { for (const f of Array.from(localeSubs)) f() }
+const OPENED = { openFile: [], loadPage: [] } // 打开笔记走了哪条路,由下面的断言钉方向
+const VAULT = { root: '/Users/x/My Vault' }  // 带空格:存档目录拼出来必须原样带着
 const ctx = {
   registerView: (v) => reg.views.push(v), registerCommand: (c) => reg.commands.push(c),
   // 宿主同款:设置**同 key 覆盖**(pluginStore.registerSetting 先按 pluginId+key filter 再 append)
@@ -42,7 +44,8 @@ const ctx = {
   registerStatusItem: (s) => { const item = { ...s }; reg.status.push(item); return { update: (p) => Object.assign(item, p), dispose: () => { item.disposed = true } } },
   subscribeLocale: (cb) => { localeSubs.add(cb); return () => localeSubs.delete(cb) },
   notify() {}, activity: { log() {} }, openView() {},
-  app: { notify() {}, writeFile: async () => {}, openFile() {}, readFile: async () => null },
+  app: { notify() {}, writeFile: async () => {}, openFile(p) { OPENED.openFile.push(p) }, loadPage(p) { OPENED.loadPage.push(p) }, readFile: async () => null,
+    vaultRoot: () => VAULT.root },
 }
 const dispose = new Function('ctx', src)(ctx)
 // 上面 ctx.app 的读写走内存 vault:队列/建夹断言要看落盘轨迹
@@ -56,7 +59,7 @@ A.ok(reg.views.find((v) => v.id === 'folder' && typeof v.mount === 'function'), 
 A.ok(reg.views.find((v) => v.id === 'library' && typeof v.mount === 'function'), '应注册 library 视图(Space 引用它)')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-open'), '应注册 bluebird-open 命令')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-library'), '应注册 bluebird-library 命令')
-A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail'], '应声明三个设置(存储夹已改用宿主标准 workFolder)')
+A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail', 'saveMedia'], '应声明四个设置(存储夹已改用宿主标准 workFolder)')
 A.equal(localeSubs.size, 1, '顶层应订一次宿主语言广播(状态栏 + 设置项就地换语言)')
 
 // ── 工作文件夹约定(1.3.0):默认走宿主 workFolder;老宿主退回 videos;saveFolder 一次性迁移 ──
@@ -115,6 +118,42 @@ const as = findAll(box2, 'a')
 A.equal(as[0].attrs.href, 'https://x.com', '安全链接设 href')
 A.equal(as[1].attrs.href, undefined, '危险协议不设 href')
 
+// 图文剪藏:独占一行的 ![](https://…) 渲染成 <img>;非 https 一律不渲染(宿主 CSP img-src 也是这一档)
+const box3 = mkEl('div')
+T.renderMarkdown(box3, '# 标题\n\n![图一](https://cdn.x/a.jpg?w=1)\n\n正文\n\n![坏](javascript:alert(1))\n\n![也坏](http://cdn.x/b.jpg)')
+const imgs = findAll(box3, 'img')
+A.equal(imgs.length, 1, '只应渲染那一张 https 图')
+A.equal(imgs[0].attrs.src, 'https://cdn.x/a.jpg?w=1', '图片 src 原样(查询串不能丢,小红书 CDN 靠它取图)')
+A.equal(imgs[0].attrs.alt, '图一')
+A.equal(findAll(box3, 'h1').length, 1, '图片行不该吃掉标题')
+
+// 铺垫句:标题前那句「我先按技能…」要掐掉(2026-08-22 实跑里模型真写了,会原样存进笔记)
+A.equal(T.stripPreamble('我先按技能抓取内容。\n\n# 标题\n\n正文'), '# 标题\n\n正文', '首标题前的铺垫应掐掉')
+A.equal(T.stripPreamble('# 标题\n\n正文'), '# 标题\n\n正文', '本来就以标题开头的不动')
+A.equal(T.stripPreamble('没有标题的一段话'), '没有标题的一段话', '整篇无标题时不许裁(会吃掉正文)')
+A.equal(T.stripPreamble('- 要点一\n- 要点二\n\n## 小节'), '- 要点一\n- 要点二\n\n## 小节', '标题前是列表=正文,不是铺垫')
+A.equal(T.stripPreamble('![[cover.jpg]]\n\n# 标题'), '![[cover.jpg]]\n\n# 标题', '标题前是图=正文,不是铺垫')
+A.equal(T.stripPreamble(''), '')
+
+// 存档件 ![[名]]:图 → img、音频 → audio(带 controls)、认不出的后缀 → 不造元素
+const box4 = mkEl('div')
+T.renderMarkdown(box4, '![[bluebird-a-01.jpg]]\n\n![[bluebird-a.m4a]]\n\n![[bluebird-a.mp4]]\n\n![[x.exe]]')
+const wlImg = findAll(box4, 'img'), wlAud = findAll(box4, 'audio'), wlVid = findAll(box4, 'video')
+A.equal(wlImg.length, 1); A.equal(wlAud.length, 1); A.equal(wlVid.length, 1)
+A.equal(wlImg[0].attrs.src, `amadeus-asset://v/${encodeURIComponent(T.assetVaultRel('bluebird-a-01.jpg'))}`,
+  '存档件应经 amadeus-asset:// 直出,整条 vault 相对路径 encodeURIComponent(照 toAssetUrl)')
+A.equal(wlAud[0].attrs.controls, 'controls', '音频要给播放控件')
+A.ok(!findAll(box4, 'embed').length && box4.textContent.includes('x.exe'), '认不出的后缀原样落成文字,不自造文件卡')
+
+// 存档目录:默认开(宿主在「值=默认」时删键 → 判据必须是 !== 'false')
+A.equal(T.mediaSaveDir(), `/Users/x/My Vault/${T.folderRoot()}/assets`, '默认应开启存档,且路径里的空格原样保留')
+localStorage.setItem('plugin.bluebird.saveMedia', 'false')
+A.equal(T.mediaSaveDir(), null, '关掉开关就不存档')
+localStorage.setItem('plugin.bluebird.saveMedia', 'true')
+VAULT.root = null
+A.equal(T.mediaSaveDir(), null, '云端库/未开库没有本机路径,不能存档')
+VAULT.root = '/Users/x/My Vault'
+
 // 平台识别 + 内嵌地址
 const yt = T.parsePlatform('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
 A.equal(yt.platform, 'youtube'); A.equal(yt.videoId, 'dQw4w9WgXcQ')
@@ -128,6 +167,35 @@ A.ok(/&t=90&autoplay=1/.test(bili.embed(90)), 'Bilibili seek 应带 &t= 并即�
 A.ok(/autoplay=0/.test(bili.embed(0)), 'Bilibili 首载不自动播放')
 A.equal(T.isSupported('https://youtu.be/abc'), true)
 A.equal(T.isSupported('https://example.com/x'), false)
+
+// 音乐三家:识别得出、都不内嵌(宿主 CSP frame-src 没放行音乐播放器)、进得了输入框
+const wy = T.parsePlatform('https://music.163.com/#/song?id=1330348068')
+A.equal(wy.platform, 'netease'); A.equal(wy.videoId, '1330348068')
+A.equal(T.parsePlatform('https://music.163.com/song?id=186016').videoId, '186016')
+const qq = T.parsePlatform('https://y.qq.com/n/ryqq/songDetail/004Z8Ihr0JIu5s')
+A.equal(qq.platform, 'qqmusic'); A.equal(qq.videoId, '004Z8Ihr0JIu5s')
+A.equal(T.parsePlatform('https://y.qq.com/n/yqq/song/004Z8Ihr0JIu5s.html').videoId, '004Z8Ihr0JIu5s')
+const am = T.parsePlatform('https://music.apple.com/cn/album/x/1444818058?i=1444818070')
+A.equal(am.platform, 'applemusic'); A.equal(am.videoId, '1444818070')
+A.equal(T.parsePlatform('https://music.apple.com/us/song/hey-jude/1441133101').videoId, '1441133101')
+for (const u of ['https://music.163.com/#/song?id=1', 'https://163cn.tv/abc', 'https://y.qq.com/n/ryqq/songDetail/x', 'https://music.apple.com/us/song/x/1']) {
+  A.equal(T.isSupported(u), true, `音乐链接应进得了输入框:${u}`)
+  A.equal(T.isMusic(T.parsePlatform(u).platform), true, `应判定为音乐平台:${u}`)
+  A.equal(T.parsePlatform(u).embed, null, `音乐平台不给内嵌播放器:${u}`)
+}
+A.equal(T.isMusic('bilibili'), false, '视频平台不许走音乐支线')
+
+// 打开笔记:裸 .md 必须走 loadPage(在 Amadeus 里开)。宿主的 openFile 对没有插件文件类型认领的
+// 裸 .md 会回落 openVaultFile = 系统默认程序(TextEdit)。⚠️这条断言的方向就是 bug 本身,别写反。
+OPENED.openFile.length = 0; OPENED.loadPage.length = 0
+T.openNotePath('青鸟收藏夹/2026-08-21-起风了.md')
+A.deepEqual(OPENED.loadPage, ['青鸟收藏夹/2026-08-21-起风了.md'], '裸 .md 应走 loadPage 在 Amadeus 里打开')
+A.deepEqual(OPENED.openFile, [], '裸 .md 绝不许走 openFile(会甩给系统默认程序,笔记在 TextEdit 里开)')
+T.openNotePath('')
+A.deepEqual(OPENED.loadPage.length, 1, '空路径不该触发打开')
+A.equal(T.isMusic(''), false)
+// 平台名三语键都在(en 侧无中文由下面的词表对齐循环兜)
+for (const p of ['netease', 'qqmusic', 'applemusic']) A.ok(T.platLabel(p) && T.platLabel(p) !== T.platLabel('zzz'), `${p} 应有平台显示名`)
 
 // 分享文案抽链接
 A.equal(T.extractUrl('看看这个 https://youtu.be/dQw4w9WgXcQ 很不错').includes('youtu.be/dQw4w9WgXcQ'), true)
@@ -211,10 +279,11 @@ A.equal(T.L(), 'en', 'L() 应现读 ctx.getLocale,不缓存')
 emitLocale()
 A.equal(reg.status[0].text, '🐦 Bluebird', '状态栏项应经 update() 就地换成英文')
 A.equal(reg.status[0].title, 'Open Bluebird')
-A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
+A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'saveMedia', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
 A.equal(reg.settings[0].label, 'Default summary template', '设置项标签应跟着切语言(宿主 registerSetting 同 key 覆盖)')
 A.equal(reg.settings[1].label, 'Default detail level (brief/standard/detailed)')
-A.equal(reg.settings[2].label, 'Enhanced auto mode')
+A.equal(reg.settings[2].label, 'Archive media')
+A.equal(reg.settings[3].label, 'Enhanced auto mode')
 
 // ── 增强自动模式:开关必须落进 vault 镜像文件 ───────────────────────────────
 // 引擎进程里的「青鸟链接收藏」技能读不到渲染进程的 localStorage,只能读这个文件。

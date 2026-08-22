@@ -79,10 +79,17 @@ console.log('\n== Skill ==')
         if (!meta.description || meta.description.length < 15) errs.push('description 缺失或太短')
         if (raw.split('\n').length < 50) errs.push('正文太薄(<50 行)')
         if (!/^##\s/m.test(body)) errs.push('正文无 ## 分节')
+        // 笔记文件名 = 正文第一个标题(main.js deriveTitle)。模板首标题若是固定小节名,
+        // 同一天收的第二条就会算出同名文件把第一条覆盖掉 —— 必须是 # 级的可变标题。
+        for (const tpl of body.match(/```markdown\n[\s\S]*?```/g) || []) {
+          const h1 = /^(#{1,6})\s/m.exec(tpl.replace(/^```markdown\n/, ''))
+          if (h1 && h1[1] !== '#') errs.push(`模板首标题是 ${h1[1]} 级(固定小节名)→ 落盘同名互相覆盖,须以 # {可变标题} 开头`)
+        }
         // snake_case 词默认按「工具名」查,但技能正文里也会出现数据字段名/环境变量。
         // 白名单只收本技能自定协议里的字段,别拿它掩盖真的编造工具名。
-        const DATA_FIELDS = new Set(['needs_asr', 'audio_path'])
-        for (const t of new Set(body.match(/\b[a-z]+(?:_[a-z]+)+\b/g) || []))
+        const DATA_FIELDS = new Set(['needs_asr', 'audio_path', 'image_text'])  // 本技能自定协议里的 source 取值
+        const scan = body.replace(/\b[a-z]+(?:_[a-z]+)+\.py\b/g, '') // 随技能分发的脚本文件名不是工具名
+        for (const t of new Set(scan.match(/\b[a-z]+(?:_[a-z]+)+\b/g) || []))
           if (!TOOLS.has(t) && !DATA_FIELDS.has(t)) errs.push(`疑似编造工具名 "${t}"`)
         errs.length ? bad(`${label}/${d}: ${errs.join(';')}`) : ok(`${label}/${d}(${meta.name}, ${raw.split('\n').length} 行)`)
       } catch (e) { bad(`${label}/${d}: ${e.message}`) }
@@ -118,10 +125,12 @@ for (const a of lsDirs(path.join(ROOT, 'agents'))) {
 /* ── Python 转录脚本自检(纯解析逻辑,不联网) ── */
 console.log('\n== Python ==')
 try {
-  const out = execFileSync('python3', ['transcribe.py', '--selftest'],
-    { cwd: path.join(ROOT, 'agents', 'bluebird', 'skills', 'bluebird-video', 'scripts'), encoding: 'utf8', timeout: 20_000 })
-  out.includes('selftest ok') ? ok(`transcribe.py — ${out.trim()}`) : bad(`transcribe.py 自检输出异常: ${out.trim()}`)
-} catch (e) { bad(`transcribe.py: ${String(e.message).split('\n')[0]}`) }
+  for (const script of ['transcribe.py', 'music_meta.py']) {
+    const out = execFileSync('python3', [script, '--selftest'],
+      { cwd: path.join(ROOT, 'agents', 'bluebird', 'skills', 'bluebird-video', 'scripts'), encoding: 'utf8', timeout: 20_000 })
+    out.includes('selftest ok') ? ok(`${script} — ${out.trim()}`) : bad(`${script} 自检输出异常: ${out.trim()}`)
+  }
+} catch (e) { bad(`python 自检: ${String(e.message).split('\n')[0]}`) }
 
 /* ── Plugin(根 manifest.json + main.js,shared/amadeus/ipc.ts gatePluginManifest + pluginStore 装载契约) ── */
 console.log('\n== Plugin ==')

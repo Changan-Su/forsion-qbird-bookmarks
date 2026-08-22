@@ -1,6 +1,6 @@
 ---
 name: 青鸟视频分析
-description: 当用户给出一条视频链接(Bilibili / YouTube / 抖音 / 小红书)或想要总结、问答、翻译某个视频内容时使用。先用 yt-dlp 抓原生/自动字幕(无字幕则交由 Forsion 的语音识别转写),再产出结构化 Markdown 总结、基于字幕的问答与字幕翻译。
+description: 当用户给出一条视频链接(Bilibili / YouTube / 抖音 / 小红书)或想要总结、问答、翻译某个视频内容时使用;小红书这类**图文帖**(没有音轨)走本技能的「图文剪藏」一节;给出音乐链接(网易云 / QQ 音乐 / Apple Music)想收藏一首歌时,走本技能的「音乐剪藏」一节。先用 yt-dlp 抓原生/自动字幕(无字幕则交由 Forsion 的语音识别转写),再产出结构化 Markdown 总结、基于字幕的问答与字幕翻译。
 version: 1.0.0
 category: 内容分析
 ---
@@ -25,16 +25,127 @@ category: 内容分析
 
 步骤(都走 `run_bash`):
 
-1. **定位脚本**:脚本在本技能目录的 `scripts/` 下。一条命令拿到绝对路径(跨 dev/prod 家目录):
-   `SCRIPT=$(find ~/.forsion ~/.forsion-dev ~/.tangu -path '*bluebird*/scripts/transcribe.py' 2>/dev/null | head -1)`
+1. **定位脚本**:脚本在本技能目录的 `scripts/` 下。**先在运行中的这个家目录里找**——引擎进程的
+   `$TANGU_HOME` 就指向它(桌面 spawn 托管后端时显式传的 `<家>/tangu`):
+
+   ```sh
+   SCRIPT=$(find "$TANGU_HOME" -path '*bluebird*/scripts/transcribe.py' 2>/dev/null | head -1)
+   [ -n "$SCRIPT" ] || SCRIPT=$(find ~/.tangu ~/.forsion-dev ~/.forsion -path '*bluebird*/scripts/transcribe.py' 2>/dev/null | head -1)
+   ```
+
+   ⚠️ **别再写成一条跨家目录的 `find ~/.forsion ~/.forsion-dev … | head -1`**。同一个脚本在
+   prod 家、dev 家、插件包里各有一份,那种写法会按 find 的目录读取顺序随机挑一份 ——
+   2026-08-22 就栽过:装到 dev 的新脚本被 prod 家里 8-19 的旧副本遮了整整四轮,
+   技能正文是新的、脚本是旧的(两者的解析机制**根本不是同一套**:技能走引擎注册表=运行中的家,
+   脚本走你在 shell 里跑的 find=跨家),于是图文帖一直报 `No video formats found`。
+   第二行的兜底只在 `$TANGU_HOME` 没设时(TUI / standalone)用,是尽力而为,不是正确性保证。
 2. **确保依赖**:`python3 -m pip install -U yt-dlp`(平台改版失效时升级它;无字幕时要抠音频,还需系统装了 `ffmpeg`,原生字幕路径不需要)。
 3. **跑转录**:`python3 "$SCRIPT" "<视频链接>"`。可选凭据用环境变量前缀:B 站高清/会员传 `BLUEBIRD_COOKIE=…`。例:`BLUEBIRD_COOKIE="SESSDATA=…" python3 "$SCRIPT" "https://..."`。
+   **素材存档**:调用方给了 `--save-to "<绝对目录>"` 就原样带上(路径含空格,引号不能去)。脚本会把图文帖的图片、视频的原始压缩音频落进那个目录,并在结果里多回一个 `assets` 数组 = **已落盘的文件名**。有 `assets` 就在正文里用 `![[文件名]]` 引用(宿主内嵌渲染:图直接显示、音视频出播放器),**别再写平台外链**——CDN 会过期。没有 `assets`(没给参数 / 存档失败 / 没素材)才退回外链。⚠️`assets` 里没有的文件名一个都不许写进正文:凭空写的 `![[…]]` 在库里是一条死链。
 4. **拿结果**:解析 stdout 的 JSON。
    - `source:"native"` → 有字幕,`segments` 直接可用,照常出总结。
    - `source:"needs_asr"` → 该视频没有字幕。**不要自己想办法转写**(别调别的工具、别写脚本调云 API):把 `audio_path` 和 `meta` 原样交回宿主,由宿主用 Forsion 的语音识别转好再回来找你出总结。宿主没接手时(比如你在 TUI 里被直接调用)就如实告诉用户「该视频无字幕,需在 Forsion 桌面里分析」。
    - 命令非零退出 = 失败,原因在 stderr,原样转达用户(常见:未装 yt-dlp/ffmpeg、链接失效或需 Cookie)。
 
 `python3 "$SCRIPT" --selftest` 可不联网自检解析逻辑。
+
+## 图文剪藏(小红书这类没有音轨的帖子)
+
+`transcribe.py` 回 `source:"image_text"` 就是这一档 —— **图和正文就是全部内容,没有音轨可转写**。
+别去找转录、别提字幕、别走 ASR 那条路。脚本已经把要的都给了:
+
+- `meta.images` —— 帖子里的图,已按 CDN 变换后缀去重,**URL 原样搬**(查询串不能删,小红书的图靠它取)
+- `text` —— 帖子正文
+- `meta` 的 title / author / thumbnail 与视频档同形
+
+### 图文收藏模板
+
+```markdown
+# {title}
+
+![[{assets[0]}]]
+![[{assets[1]}]]
+…每张图各占一行:**有 assets 就用 `![[文件名]]`**(本地存档件);
+没有 assets 才退回 `![]({images[0]})` 外链形式,顺序都按数组原序…
+
+**{author}** · [在原平台打开]({meta.webpageUrl})
+
+## 正文
+
+（`text` **原样保留**:分段照旧、话题标签(#xxx)照旧、emoji 照旧。这是帖子本体,不是你的素材,
+不许压缩、改写、翻译或"润色"。）
+
+## 要点
+
+（**只在正文超过约 500 字时才写这一节**;短帖子原文比任何摘要都好读,直接省掉。）
+```
+
+⚠️ 首行 `# {title}` 不能省也不能降级 —— 笔记文件名取自正文第一个标题,理由同上一节。
+⚠️ 正文为空(有些帖子只有图)→ 省掉「正文」一节,别拿图片 alt 或你的猜测去填。
+
+### 视频的音频存档
+
+视频档回 `needs_asr` 时,若同时回了 `assets`(带 `--save-to` 才有),那是**已存进收藏夹的原始音频**。
+在总结正文的末尾追加一节 `## 原始音频`,下面单起一行写 `![[assets 里那个文件名]]`,让笔记自己能听。
+
+(音频那条**不影响转写流程** —— 该交回宿主的 `audio_path` 照常交,两回事。)
+
+## 音乐剪藏(网易云 / QQ 音乐 / Apple Music · 用 run_bash 跑 scripts/music_meta.py)
+
+音乐链接**不走上面那条转录路** —— 不下音频、不做语音识别。歌词是现成的 ground truth,
+官方接口直接给,比 ASR 转唱歌又快又准。
+
+`scripts/music_meta.py <音乐链接>` 一次拿全:元数据 + 带时间戳的歌词 + 专辑简介 + 热评。
+定位脚本**照上面那两行**(把 `transcribe.py` 换成 `music_meta.py`)——同样先 `$TANGU_HOME` 再兜底,
+理由和那边一模一样。产出一行 JSON:
+
+```
+{"ok":true,"source":"music",
+ "meta":{"platform","songId","title","author","album","duration","thumbnail","releaseDate","webpageUrl"},
+ "lyrics":[{"start","end","text"}], "intro":"", "comments":[{"user","likes","text"}]}
+```
+
+- **Apple Music 只有元数据** —— 苹果没有公开的歌词/评论接口,`lyrics` 与 `comments` 恒空。别去别处找补,如实少这两节。
+- `intro` 是平台给的专辑简介,**经常是空的**,空就没有,不要拿它当必填。
+- 纯音乐 / 平台没上歌词 → `lyrics` 空,照常出卡片,略过歌词一节。
+
+### 音乐收藏模板
+
+正文照这个骨架填,**每一节都只写脚本真的给了的东西,缺了就整节省掉**:
+
+```markdown
+# {title} — {author}
+
+![封面](meta.thumbnail)
+
+**{author}** · 《{album}》 · {releaseDate} · {mm:ss}
+[在{平台名}打开]({meta.webpageUrl})
+
+## 关于这首歌
+
+（2-4 句。素材只有两样:你刚抓到的**歌词**和**热评**,以及 intro 里平台给的专辑简介。
+写这首歌唱的是什么、听众在它里面听见了什么。)
+
+## 歌词
+
+（原样逐行照抄 lyrics 的 text,**不带时间戳**、不改字、不补全、不翻译。)
+
+## 热评
+
+> {text}
+> —— {user} · {likes} 赞
+
+（按 likes 从高到低,最多 5 条;赞数上万写成「12.3 万赞」。)
+```
+
+⚠️ **第一行的 `# 歌名 — 歌手` 不能省、也不能降成 `##`** —— 笔记的**文件名**取自正文里第一个标题。
+省掉它,当天收的第二首歌就会算出同一个文件名,**把第一首直接覆盖掉**。
+
+⚠️ **不许用你的先验知识补内容** —— 创作背景、歌手轶事、这首歌拿过什么奖、翻唱自谁,凡是脚本没给的
+一律不写。收藏卡三个月后被人当事实读,编的和真的长得一模一样。拿不到就少一节,这是对的。
+
+⚠️ 末尾的 `json bluebird` 块里 `segments` = 脚本回的 `lyrics` **原样搬过来**(带时间戳,别改),
+它驱动详情页的「歌词」面板与后续问答;`chapters` 给空数组。
 
 ## 结构化总结
 
@@ -79,3 +190,5 @@ category: 内容分析
 - [ ] 总结覆盖了主线所有要点,没有为简短而遗漏;数字/金额/版本号照抄未改写。
 - [ ] 时间戳贴合内容位置(用户要的话);末尾 json 元数据块存在且不重复正文。
 - [ ] 转录失败时把 stderr 的真实原因转达用户,不假装成功、不产空总结。
+- [ ] 图文剪藏:图片 URL 原样(含查询串)、正文原样未压缩;没提转录/字幕;正文为空时省掉那一节而不是编。
+- [ ] 音乐剪藏:歌词原样照抄未改写;「关于这首歌」只用了抓到的歌词/热评/简介,没掺先验知识;脚本没给的节直接省掉。

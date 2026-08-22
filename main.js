@@ -27,6 +27,7 @@ const MSG = {
     setTplDesc: '通用/学术/访谈/播客/会议/新闻/教程/Vlog/旅行/测评',
     setDetailLabel: '默认详细程度(brief/standard/detailed)',
     setDetailDesc: '简洁/标准/详细',
+    setMediaLabel: '存原始素材', setMediaDesc: '把图文帖的图片、视频的原始音频一并下载进收藏夹的 assets/,笔记里内嵌本地文件而不是外链(外链会随平台 CDN 过期失效)。占磁盘,不想要就关掉。',
     setAutoLabel: '增强自动模式',
     setAutoDesc: '在任意 Tangu 对话里单独丢一条链接、语境没有歧义时,不再问一句,直接抓正文存进笔记库',
     // 模板 / 详细度(值是中文 canonical,这里只是显示名)
@@ -36,6 +37,7 @@ const MSG = {
     // 平台
     platYoutube: 'YouTube', platBilibili: 'Bilibili', platXiaohongshu: '小红书', platDouyin: '抖音',
     platGithub: 'GitHub', platVideo: '视频',
+    platNetease: '网易云音乐', platQqmusic: 'QQ 音乐', platApplemusic: 'Apple Music',
     // 贡献点
     viewLibrary: '收藏夹', viewFolder: '青鸟收藏夹',
     cmdOpen: '青鸟收藏夹:打开', cmdLibrary: '青鸟收藏夹:打开侧栏',
@@ -80,15 +82,15 @@ const MSG = {
     back: '返回', resummarize: '重新总结', exportBtn: '导出 ▾',
     openNote: '打开笔记', saveToLibrary: '存入收藏夹',
     qaTitle: 'AI 问答', qaPlaceholderWait: '分析完成后可提问…', qaPlaceholder: '就这个视频提问…', qaSend: '问',
-    tabSummary: '总结', tabTranscript: '字幕',
+    tabSummary: '总结', tabTranscript: '字幕', tabLyrics: '歌词',
     hintSummary: '正文里的 [MM:SS] 可点击跳转播放器',
     // 量词/复数按语言分键:中文两侧同形,英文 1 条要用单数(见 setHint)
-    hintTranscript: '带时间戳的字幕内容{count}', hintCount: ' · 共 {n} 条', hintCountOne: ' · 共 {n} 条',
+    hintTranscript: '带时间戳的字幕内容{count}', hintLyrics: '带时间戳的歌词{count}', hintCount: ' · 共 {n} 条', hintCountOne: ' · 共 {n} 条',
     analyzing: '分析中…', noSummary: '(无总结)',
     wcOk: '字数达标', wcShort: '字数偏少', wcLong: '字数偏多',
     wcCount: '字数 {n}', wcTarget: ' / 目标 {min}-{max}', wcDetail: ' · 档位:{name}',
     generatedAt: '生成于 {time}',
-    noTranscript: '暂无字幕(纯 ASR 或未返回)。', openInBrowser: '在浏览器打开 ↗',
+    noTranscript: '暂无字幕(纯 ASR 或未返回)。', noLyrics: '这首歌没有歌词(纯音乐,或该平台没提供)。', openInBrowser: '在浏览器打开 ↗',
     resummarizeTitle: '重新总结(重新分析并排队)', start: '开始',
     needAnalyzeFirst: '先分析一个视频', noAnswer: '(无回答)',
     nothingToSave: '还没有可保存的总结', savedToLibrary: '已存入收藏夹', saveFailed: '保存失败:{msg}',
@@ -106,6 +108,7 @@ const MSG = {
     setTplDesc: 'General / Academic / Interview / Podcast / Meeting / News / Tutorial / Vlog / Travel / Review',
     setDetailLabel: 'Default detail level (brief/standard/detailed)',
     setDetailDesc: 'Brief / Standard / Detailed',
+    setMediaLabel: 'Archive media', setMediaDesc: "Download image-post pictures and video audio into the library's assets/ folder and embed the local files, instead of hotlinking (hotlinks die when the platform's CDN expires them). Uses disk; turn off if you'd rather not.",
     setAutoLabel: 'Enhanced auto mode',
     setAutoDesc: 'When a link arrives on its own in any Tangu chat and the intent is unambiguous, file it straight into the vault instead of asking first',
     tplGeneral: 'General', tplAcademic: 'Academic', tplInterview: 'Interview', tplPodcast: 'Podcast', tplMeeting: 'Meeting',
@@ -113,6 +116,7 @@ const MSG = {
     detailBrief: 'Brief', detailStandard: 'Standard', detailDetailed: 'Detailed',
     platYoutube: 'YouTube', platBilibili: 'Bilibili', platXiaohongshu: 'Xiaohongshu', platDouyin: 'Douyin',
     platGithub: 'GitHub', platVideo: 'Video',
+    platNetease: 'NetEase Music', platQqmusic: 'QQ Music', platApplemusic: 'Apple Music',
     viewLibrary: 'Library', viewFolder: 'Bluebird',
     cmdOpen: 'Bluebird: Open', cmdLibrary: 'Bluebird: Open library',
     statusText: '🐦 Bluebird', statusTitle: 'Open Bluebird',
@@ -150,14 +154,14 @@ const MSG = {
     back: 'Back', resummarize: 'Re-summarize', exportBtn: 'Export ▾',
     openNote: 'Open note', saveToLibrary: 'Save to library',
     qaTitle: 'Ask AI', qaPlaceholderWait: 'Ask once the analysis finishes…', qaPlaceholder: 'Ask about this video…', qaSend: 'Ask',
-    tabSummary: 'Summary', tabTranscript: 'Transcript',
+    tabSummary: 'Summary', tabTranscript: 'Transcript', tabLyrics: 'Lyrics',
     hintSummary: 'Click any [MM:SS] in the text to jump the player',
-    hintTranscript: 'Timestamped transcript{count}', hintCount: ' · {n} segments', hintCountOne: ' · {n} segment',
+    hintTranscript: 'Timestamped transcript{count}', hintLyrics: 'Timestamped lyrics{count}', hintCount: ' · {n} segments', hintCountOne: ' · {n} segment',
     analyzing: 'Analyzing…', noSummary: '(No summary)',
     wcOk: 'On target', wcShort: 'Too short', wcLong: 'Too long',
     wcCount: '{n} characters', wcTarget: ' / target {min}-{max}', wcDetail: ' · Detail: {name}',
     generatedAt: 'Generated {time}',
-    noTranscript: 'No transcript here (audio-only recognition, or none returned).', openInBrowser: 'Open in browser ↗',
+    noTranscript: 'No transcript here (audio-only recognition, or none returned).', noLyrics: 'No lyrics for this track (instrumental, or the platform provides none).', openInBrowser: 'Open in browser ↗',
     // 这行渲染进 .bb-label(text-transform:uppercase)、浮层只有 230px:英文整句大写会折行,故只留动词
     resummarizeTitle: 'Re-summarize', start: 'Start',
     needAnalyzeFirst: 'Analyze a video first', noAnswer: '(No answer)',
@@ -207,6 +211,7 @@ const detailLabel = (k) => (DETAIL_KEY[k] ? t(DETAIL_KEY[k]) : '')
 function registerSettings() {
   ctx.registerSetting({ key: 'defaultTemplate', label: t('setTplLabel'), type: 'text', default: '通用', description: t('setTplDesc') })
   ctx.registerSetting({ key: 'detail', label: t('setDetailLabel'), type: 'text', default: 'standard', description: t('setDetailDesc') })
+  ctx.registerSetting({ key: 'saveMedia', label: t('setMediaLabel'), type: 'boolean', default: true, description: t('setMediaDesc') })
   ctx.registerSetting({ key: 'autoSave', label: t('setAutoLabel'), type: 'boolean', default: false, description: t('setAutoDesc') })
 }
 registerSettings()
@@ -221,6 +226,19 @@ try {
 // ── 纯函数(经文末 __BLUEBIRD_TEST__ 暴露给 check.mjs) ────────────────────────
 
 const getSetting = (k, d) => { try { return localStorage.getItem(`plugin.${PLUGIN_ID}.${k}`) || d } catch { return d } }
+
+/** 素材存档目录(绝对路径),关了开关 / 云端库 / 没开库 → null(退回外链,笔记照样成立)。
+ *  ⚠️默认开 → 宿主在「值=默认」时会把键删掉,所以判据是 `!== 'false'` 而不是 `=== 'true'`。
+ *  ⚠️每次跑现算,不缓存:运行时可以切库,`vaultRoot()` 是渲染进程 store 的当下值。 */
+const ASSETS_SUBDIR = 'assets'
+function mediaSaveDir() {
+  if (getSetting('saveMedia', 'true') === 'false') return null
+  const root = (ctx.app && ctx.app.vaultRoot && ctx.app.vaultRoot()) || null
+  if (!root) return null                       // 云端库/未开库:主进程那边没有本机路径可写
+  return `${String(root).replace(/[/\\]+$/, '')}/${folderRoot()}/${ASSETS_SUBDIR}`
+}
+/** 存档件在 vault 里的相对路径 —— 插件自己的渲染面要靠它拼 amadeus-asset:// */
+const assetVaultRel = (name) => `${folderRoot()}/${ASSETS_SUBDIR}/${name}`
 
 // ── 增强自动模式:把开关镜像进 vault 的一个小文件 ─────────────────────────────
 // 为什么要镜像:开关值住在**渲染进程的 localStorage**,读它的却是**引擎进程**里的「青鸟链接收藏」
@@ -282,16 +300,34 @@ function parsePlatform(url) {
   if (/xiaohongshu\.com|xhslink/.test(u)) return { platform: 'xiaohongshu', videoId: '', embed: null }
   if (/douyin\.com/.test(u)) return { platform: 'douyin', videoId: '', embed: null }
   if (/github\.com/.test(u)) return { platform: 'github', videoId: '', embed: null }
+  // 音乐三家:只剪藏不放音(宿主 CSP frame-src 没放行它们的播放器,且音源都有版权闸)
+  if ((m = u.match(/music\.163\.com.*?[?&#/]id=(\d+)/)) || (m = u.match(/music\.163\.com\/song\/(\d+)/))) {
+    return { platform: 'netease', videoId: m[1], embed: null }
+  }
+  if (/music\.163\.com|163cn\.tv/.test(u)) return { platform: 'netease', videoId: '', embed: null }
+  if ((m = u.match(/y\.qq\.com\/n\/(?:ryqq\/songDetail|yqq\/song)\/([\w]+)/))) {
+    return { platform: 'qqmusic', videoId: m[1].replace(/\.html$/, ''), embed: null }
+  }
+  if (/y\.qq\.com/.test(u)) return { platform: 'qqmusic', videoId: '', embed: null }
+  if ((m = u.match(/music\.apple\.com\/.*?[?&]i=(\d+)/)) || (m = u.match(/music\.apple\.com\/[a-z]{2}\/song\/[^/]*\/(\d+)/))) {
+    return { platform: 'applemusic', videoId: m[1], embed: null }
+  }
+  if (/music\.apple\.com/.test(u)) return { platform: 'applemusic', videoId: '', embed: null }
   return { platform: '', videoId: '', embed: null }
 }
 const PLATFORM_META = {
   youtube: { key: 'platYoutube', badge: 'pink' }, bilibili: { key: 'platBilibili', badge: 'b' },
   xiaohongshu: { key: 'platXiaohongshu', badge: 'pink' }, douyin: { key: 'platDouyin', badge: 'slate' },
   github: { key: 'platGithub', badge: 'slate' }, '': { key: 'platVideo', badge: 'slate' },
+  netease: { key: 'platNetease', badge: 'pink' }, qqmusic: { key: 'platQqmusic', badge: 'slate' },
+  applemusic: { key: 'platApplemusic', badge: 'slate' },
 }
+/** 音乐平台走「剪藏」支线:抓歌词/热评/封面,不下音频、不走语音识别。 */
+const MUSIC_PLATFORMS = ['netease', 'qqmusic', 'applemusic']
+const isMusic = (platform) => MUSIC_PLATFORMS.includes(platform)
 const platLabel = (p) => t((PLATFORM_META[p] || PLATFORM_META['']).key)
 
-const SUPPORTED = /(?:youtu\.?be|youtube\.com|bilibili\.com|b23\.tv|xiaohongshu\.com|xhslink\.com|douyin\.com|github\.com)/i
+const SUPPORTED = /(?:youtu\.?be|youtube\.com|bilibili\.com|b23\.tv|xiaohongshu\.com|xhslink\.com|douyin\.com|github\.com|music\.163\.com|163cn\.tv|y\.qq\.com|music\.apple\.com)/i
 /** 从分享文本里抠出第一条支持的链接(粘一整段分享文案也能识别)。 */
 function extractUrl(text) {
   const m = String(text || '').match(new RegExp(`https?:\\/\\/[^\\s]*${SUPPORTED.source}[^\\s]*`, 'i'))
@@ -306,8 +342,21 @@ function parseAgentOutput(text) {
   const m = raw.match(re)
   let data = null
   if (m) { try { data = JSON.parse(m[1].trim()) } catch { data = null } }
-  const summary = raw.replace(re, '').replace(/\n{3,}/g, '\n\n').trim()
+  const summary = stripPreamble(raw.replace(re, '').replace(/\n{3,}/g, '\n\n').trim())
   return { summary, data }
+}
+
+/** 掐掉正文首个标题之前的铺垫句。提示词里写了「不要寒暄」,模型照样常写一句
+ *  「我先按技能抓取…随后生成总结」—— 那句会原样存进用户的笔记。
+ *  只在**确有标题**时裁(没标题就说明整篇都是散文,裁了会吃掉正文);
+ *  裁掉的部分里若含 markdown 结构(列表/引用/代码/图),说明那不是铺垫,不动。 */
+function stripPreamble(md) {
+  const text = String(md || '')
+  const at = text.search(/^#{1,6}\s+\S/m)
+  if (at <= 0) return text
+  const head = text.slice(0, at)
+  if (/^\s*(?:[-*+>|]|\d+\.|```|!\[|\[\[)/m.test(head)) return text
+  return text.slice(at)
 }
 
 function deriveTitle(md) {
@@ -387,6 +436,39 @@ function renderMarkdown(container, md, onSeek) {
     if (t === '') { flushPara(); flushList(); i++; continue }
     const h = /^(#{1,6})\s+(.*)$/.exec(t)
     if (h) { flushPara(); flushList(); const el = document.createElement('h' + Math.min(4, h[1].length)); el.appendChild(inline(h[2], onSeek)); container.appendChild(el); i++; continue }
+    // ![[文件名]] = 落进收藏夹 assets/ 的存档件。宿主用 amadeus-asset:// 解析(CSP 已放行该协议),
+    // 拼法照 shared/amadeus/assets.ts 的 toAssetUrl:整条 vault 相对路径 encodeURIComponent。
+    // 认不出的后缀不自作主张造文件卡,原样当文字落到段落里。
+    const wl = /^!\[\[([^\]|]+?)(?:\|\d+)?\]\]$/.exec(t)
+    if (wl) {
+      const name = wl[1].trim()
+      const kind = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(name) ? 'img'
+        : /\.(mp3|wav|ogg|m4a|flac)$/i.test(name) ? 'audio'
+          : /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : ''
+      if (kind) {
+        flushPara(); flushList()
+        const el = document.createElement(kind)
+        el.className = kind === 'img' ? 'bb-md-img' : 'bb-md-av'
+        el.setAttribute('src', `amadeus-asset://v/${encodeURIComponent(assetVaultRel(name))}`)
+        if (kind === 'img') el.setAttribute('alt', name)
+        else el.setAttribute('controls', 'controls')
+        el.addEventListener('error', () => el.remove())
+        container.appendChild(el)
+        i++; continue
+      }
+    }
+    const im = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(t)
+    if (im) {
+      flushPara(); flushList()
+      const src = safeHref(im[2])
+      if (/^https:/i.test(src)) {   // 只放行 https(宿主 CSP img-src 也是这一档);拿不到就当没有
+        const img = document.createElement('img'); img.className = 'bb-md-img'
+        img.setAttribute('src', src); img.setAttribute('alt', im[1] || '')
+        img.addEventListener('error', () => img.remove())
+        container.appendChild(img)
+      }
+      i++; continue
+    }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) { flushPara(); flushList(); container.appendChild(document.createElement('hr')); i++; continue }
     if (/^>\s?/.test(t)) { flushPara(); flushList(); const bq = document.createElement('blockquote'); bq.appendChild(inline(t.replace(/^>\s?/, ''), onSeek)); container.appendChild(bq); i++; continue }
     const ul = /^[-*]\s+(.*)$/.exec(t), ol = /^\d+\.\s+(.*)$/.exec(t)
@@ -503,6 +585,17 @@ async function readIndex() {
   return cur || { folders: [], items: [] }
 }
 const writeIndex = (idx) => ctx.app.writeFile(indexPath(), JSON.stringify(idx, null, 2))
+/** 打开青鸟自己写的那篇**裸 `.md`** 笔记 —— 一律 `loadPage`,**不许用 `openFile`**。
+ *  宿主 `openFile` 只认插件注册过的后缀与内置那几类(`.excalidraw.md`/`.mindmap.md`/`.db`/`.pdf`/图片/`.html`),
+ *  裸 `.md` 落 `amadeus.openVaultFile()` = 交给系统默认程序,笔记会在 TextEdit 里打开。
+ *  (真源 `desktop/frontend/src/amadeusNav.ts` 的 `openFile`:`if (!matchFileType(path)) openVaultFile(path)`。)
+ *  ⚠️反过来同样是事故:`loadPage` 吃到插件文件类型会把它当普通笔记导进 v3 = 毁档 —— 本函数只喂青鸟自己写的裸 .md。
+ *  ⚠️`loadPage` 对不存在的路径会凭空造一篇空白笔记,所以只在 `saveEntry` 成功之后调用。 */
+function openNotePath(path) {
+  if (!path) return
+  if (ctx.app && typeof ctx.app.loadPage === 'function') { ctx.app.loadPage(path); return }
+  if (ctx.app && typeof ctx.app.openFile === 'function') ctx.app.openFile(path) // 老宿主没有 loadPage 时的兜底
+}
 async function saveEntry(full) {
   const id = full.id || uuid()
   const idx = await readIndex()
@@ -570,6 +663,12 @@ const outSpec = (it) => `输出两部分:①给用户看的 Markdown 总结正�
 \`\`\`json bluebird
 {"meta":{"title":"","platform":"${it.plat.platform}","videoId":"${it.plat.videoId}","videoUrl":"${it.url}","author":"","duration":0,"thumbnail":""},"segments":[{"start":0,"end":0,"text":""}],"chapters":[{"t":0,"title":""}],"tags":[]}
 \`\`\``
+// 音乐剪藏的输出契约:沿用同一套 meta/segments 形状(segments=歌词行),
+// 保存/索引/导出/问答那一整条链就一行都不用改。多带个 album 进 sidecar。
+const musicSpec = (it) => `输出两部分:①给用户看的音乐收藏卡片 Markdown 正文(照技能里的模板;不要寒暄、不要问是否保存)。②正文之后另起一行追加一个机器可读代码块(我拿它做歌词面板,不展示给用户;segments = 脚本回的 lyrics 数组**原样搬过来**,别改时间也别重写句子):
+\`\`\`json bluebird
+{"meta":{"title":"","platform":"${it.plat.platform}","videoId":"${it.plat.videoId}","videoUrl":"${it.url}","author":"","album":"","duration":0,"thumbnail":""},"segments":[{"start":0,"end":0,"text":""}],"chapters":[],"tags":[]}
+\`\`\``
 const runEntry = (it) => ({ id: it.entryId, summaryMarkdown: it.summary, meta: (it.data && it.data.meta) || { platform: it.plat.platform, videoId: it.plat.videoId, videoUrl: it.url }, segments: (it.data && it.data.segments) || [], chapters: (it.data && it.data.chapters) || [], tags: (it.data && it.data.tags) || [], sourceUrl: it.url, folderId: null, tpl: it.tpl, detail: it.detail })
 async function qRun(it) {
   const cfg = await getCfg()
@@ -584,15 +683,25 @@ async function qRun(it) {
     qEmit()
   }
   const onTick = (full) => { const p = parseAgentOutput(full); it.summary = p.summary || full; bus.emit({ type: 'run-delta', id: it.id }) }
-  const SPEC = outSpec(it)
-  const msg = `请分析这个视频。按「青鸟视频分析」技能:host 模式 run_bash 跑 transcribe.py 抓转录,再产出结构化 Markdown 总结(模板:${it.tpl},详细度:${DETAILS[it.detail] || '标准'})。
+  const music = isMusic(it.plat.platform)
+  const SPEC = music ? musicSpec(it) : outSpec(it)
+  // 素材存档:脚本跑在真实文件系统上,只有 vault 相对路径喂不进去 —— 这正是 ctx.app.vaultRoot() 的用途。
+  // 现算不缓存(运行时可切库);关了开关/云端库 → 空串,整段指令不出现,agent 照旧只抓不存。
+  const saveDir = music ? null : mediaSaveDir()
+  const saveArg = saveDir ? `
+跑脚本时**带上存档参数**:\`--save-to "${saveDir}"\`(路径含空格,引号不能去)。脚本回的 \`assets\` 是已经落进收藏夹的文件名 —— 正文里一律用 \`![[文件名]]\` 引用它们(宿主会内嵌渲染:图直接显示、音频/视频出播放器),**别再写平台的原始外链**(CDN 会过期)。脚本没回 \`assets\`(存档失败或没素材)才退回外链。` : ''
+  // 音乐:不下音频、不走语音识别 —— 歌词是现成的,抓来就是 ground truth。模板/详细度对收藏卡不适用,忽略。
+  const msg = music ? `请把这条音乐链接做成一条收藏。按「青鸟视频分析」技能里的「音乐剪藏」一节:host 模式 run_bash 跑 scripts/music_meta.py 抓元数据/歌词/简介/热评,再按那一节的音乐收藏模板产出 Markdown 正文。
+${SPEC}
+音乐链接:${it.url}${respondIn()}` : `请分析这个视频。按「青鸟视频分析」技能:host 模式 run_bash 跑 transcribe.py 抓转录,再产出结构化 Markdown 总结(模板:${it.tpl},详细度:${DETAILS[it.detail] || '标准'})。
 ${SPEC}
 若脚本回的是 source:"needs_asr"(该视频没有字幕),**不要自己想办法转写**:直接只输出这一个代码块、不要总结正文——
 \`\`\`json bluebird
 {"needs_asr":true,"audio_path":"脚本给的路径","meta":{...脚本给的 meta...}}
 \`\`\`
 我会用 Forsion 自己的语音识别转好再回来找你。
-视频链接:${it.url}${respondIn()}`
+若脚本回的是 source:"image_text"(这是一篇**图文帖**,没有音轨,图和正文就是全部内容),照技能里「图文剪藏」一节的模板产出正文,**别提转录也别提字幕**;数据块照给,meta 里多带一个 images 数组(脚本给的原样搬),segments 放正文(整段一条 {"start":0,"end":0,"text":"正文全文"},后续问答要靠它)。
+视频链接:${it.url}${saveArg}${respondIn()}`
   try {
     let out = await runAgent(cfg, it.sessionId, msg, onTick, it.controller.signal, onStage)
     let parsed = parseAgentOutput(out)
@@ -638,7 +747,7 @@ const countWords = (md) => String(md || '').replace(/```[\s\S]*?```/g, '').repla
 const wordState = (n, detail) => { const r = WORD_RANGES[detail]; if (!r || !n) return null; return n < r[0] ? t('wcShort') : n > r[1] ? t('wcLong') : t('wcOk') }
 
 // ── 平台图标:官方 favicon(照原版侧栏),加载失败退回文字徽标 ──
-const PLATFORM_FAVICON = { youtube: 'https://www.youtube.com/favicon.ico', bilibili: 'https://www.bilibili.com/favicon.ico', xiaohongshu: 'https://www.xiaohongshu.com/favicon.ico', douyin: 'https://www.douyin.com/favicon.ico', github: 'https://github.com/favicon.ico' }
+const PLATFORM_FAVICON = { youtube: 'https://www.youtube.com/favicon.ico', bilibili: 'https://www.bilibili.com/favicon.ico', xiaohongshu: 'https://www.xiaohongshu.com/favicon.ico', douyin: 'https://www.douyin.com/favicon.ico', github: 'https://github.com/favicon.ico', netease: 'https://s1.music.126.net/style/favicon.ico', qqmusic: 'https://y.qq.com/favicon.ico', applemusic: 'https://music.apple.com/favicon.ico' }
 function platIcon(platform, size) {
   const u = PLATFORM_FAVICON[platform]
   if (!u) return badge(platform)
@@ -786,6 +895,8 @@ const STYLE = `
 .bb-out h1,.bb-out h2,.bb-out h3,.bb-out h4{margin:.9em 0 .4em;line-height:1.3}
 .bb-out h1{font-size:1.5em}.bb-out h2{font-size:1.25em}.bb-out h3{font-size:1.08em}
 .bb-out pre{background:var(--bb-surf-sub);padding:10px 12px;border-radius:10px;overflow:auto}
+.bb-md-img{display:block;max-width:100%;height:auto;border-radius:10px;margin:.6em 0}
+.bb-md-av{display:block;width:100%;max-width:100%;border-radius:10px;margin:.6em 0}
 .bb-out code{background:var(--bb-surf-sub);padding:1px 5px;border-radius:5px;font-family:ui-monospace,Menlo,monospace}
 .bb-out pre code{background:transparent;padding:0}
 .bb-out blockquote{margin:.6em 0;padding:2px 12px;border-left:3px solid var(--bb-primary);color:var(--bb-text-sec)}
@@ -1250,10 +1361,12 @@ function mountAnalyze(el) {
     }
     // 标签切换 + 提示行(照原版 RightPanelTabs 的 hint)
     const outEl = $('[data-summary]'), trEl = $('[data-transcript]'), hintEl = $('[data-hint]')
+    const music = isMusic(view.plat.platform)
+    const tabT = root.querySelector('[data-tab="t"]'); if (tabT) tabT.textContent = t(music ? 'tabLyrics' : 'tabTranscript')
     const setHint = (s) => {
       const n = (view.data && view.data.segments && view.data.segments.length) || 0
       // 量词按语言取:英文 1 条要用单数(中文两键同形),别让英文界面出现 "1 segments"
-      hintEl.textContent = s ? t('hintSummary') : t('hintTranscript', { count: n ? t(n === 1 ? 'hintCountOne' : 'hintCount', { n }) : '' })
+      hintEl.textContent = s ? t('hintSummary') : t(music ? 'hintLyrics' : 'hintTranscript', { count: n ? t(n === 1 ? 'hintCountOne' : 'hintCount', { n }) : '' })
     }
     setHint(true)
     root.querySelectorAll('[data-tab]').forEach((tabEl) => tabEl.addEventListener('click', () => {
@@ -1298,7 +1411,7 @@ function mountAnalyze(el) {
     const trEl = root.querySelector('[data-transcript]'); if (!trEl) return
     trEl.innerHTML = ''
     const segs = (view.data && Array.isArray(view.data.segments)) ? view.data.segments : []
-    if (!segs.length) { const em = document.createElement('div'); em.className = 'bb-empty'; em.textContent = t('noTranscript'); trEl.appendChild(em); return }
+    if (!segs.length) { const em = document.createElement('div'); em.className = 'bb-empty'; em.textContent = t(isMusic(view.plat.platform) ? 'noLyrics' : 'noTranscript'); trEl.appendChild(em); return }
     for (const s of segs) {
       const row = document.createElement('div'); row.className = 'bb-seg'
       const ts = document.createElement('span'); ts.className = 'bb-ts'; ts.textContent = `[${fmtTime(s.start)} - ${fmtTime(s.end == null ? s.start : s.end)}]`; ts.addEventListener('click', () => seekHandler && seekHandler(s.start))
@@ -1349,7 +1462,7 @@ function mountAnalyze(el) {
     const b = root.querySelector('[data-save]'); if (b) b.textContent = t('openNote')
   }
   async function doSave() {
-    if (view.entryId && view.notePath) { if (ctx.app.openFile) ctx.app.openFile(view.notePath); return } // 已保存 → 打开笔记
+    if (view.entryId && view.notePath) { openNotePath(view.notePath); return } // 已保存 → 在 Amadeus 里打开笔记
     if (!view.summary.trim()) { say2(t('nothingToSave'), { level: 'warning' }); return }
     try { const r = await saveEntry(currentEntry()); markSaved(r); say2(t('savedToLibrary'), { level: 'success' }) }
     catch (e) { say2(t('saveFailed', { msg: (e && e.message) || e }), { level: 'error' }) }
@@ -1367,7 +1480,7 @@ function mountAnalyze(el) {
     add(t('expSrt', { suffix: noSeg }), () => segs.length ? dl('.srt', toSRT(segs)) : say2(t('noTranscriptData'), { level: 'warning' }))
     add(t('expTxt', { suffix: noSeg }), () => segs.length ? dl('.txt', toTXT(segs, true)) : say2(t('noTranscriptData'), { level: 'warning' }))
     add(t('expJson'), () => dl('.json', JSON.stringify({ meta: (view.data && view.data.meta) || {}, summaryMarkdown: view.summary, segments: segs, chapters: (view.data && view.data.chapters) || [], tags: (view.data && view.data.tags) || [], exportedAt: new Date().toISOString() }, null, 2), 'application/json'))
-    add(t('expSaveNote'), async () => { closeMenus(); try { const r = await saveEntry(currentEntry()); markSaved(r); if (ctx.app.openFile) ctx.app.openFile(r.notePath); say2(t('savedAsNote'), { level: 'success' }) } catch (e) { say2(t('failedPrefix', { msg: (e && e.message) || e }), { level: 'error' }) } })
+    add(t('expSaveNote'), async () => { closeMenus(); try { const r = await saveEntry(currentEntry()); markSaved(r); openNotePath(r.notePath); say2(t('savedAsNote'), { level: 'success' }) } catch (e) { say2(t('failedPrefix', { msg: (e && e.message) || e }), { level: 'error' }) } })
     showMenu(box)
   }
 
@@ -1446,7 +1559,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
 return () => { // 插件停用才断分析

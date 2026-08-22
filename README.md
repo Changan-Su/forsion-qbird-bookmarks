@@ -12,7 +12,7 @@
 |---|---|---|
 | 插件 `bluebird` | 根(`manifest.json` + `main.js`) | 工作台视图(输入链接、看总结、存笔记) |
 | 「青鸟收藏夹」Agent | `agents/bluebird/` | 引擎侧智能体,视图驱动它跑分析;引擎启动时**播种一次**到 `tangu/agents/`,之后独立存在(升级不覆盖你的改动) |
-| 「青鸟视频分析」技能 | `agents/bluebird/skills/bluebird-video/` | 转录(yt-dlp)+ 总结/问答/翻译工作流(agent 级,随 Agent 播种) |
+| 「青鸟视频分析」技能 | `agents/bluebird/skills/bluebird-video/` | 转录(yt-dlp)+ 总结/问答/翻译工作流(agent 级,随 Agent 播种);另带**音乐剪藏**支线 `scripts/music_meta.py`(网易云 / QQ 音乐 / Apple Music 单曲 → 歌词+热评+封面收藏卡,不下音频不走 ASR) |
 | 「青鸟链接收藏」技能 | `skills/bluebird-link/` | 文章/文档链接 → 抓正文 → 笔记存进 vault `Links/`(**bundle 级,原地读,所有 agent 可见**,所以在任意 Tangu 对话里说「存一下」就能用;视频链接不接,引导去工作台)。设置项「增强自动模式」经 `<vault>/.bluebird/link-mode.json` 镜像给它 —— 设置值在渲染进程的 localStorage,技能在引擎进程,只有 vault 是两边都够得着的地方 |
 | 「青鸟收藏夹」Space | `spaces/bluebird/` | 工作台一键布局,随插件启停显隐 |
 
@@ -25,7 +25,7 @@
 ## 用法
 
 1. 命令面板(⌘/Ctrl-K)「青鸟收藏夹:打开」,或状态栏图标 → 打开视图。
-2. 贴视频链接、选总结模板(默认「通用」)、点「分析」。视图驱动「青鸟收藏夹」Agent:抓字幕 → 出 Markdown 总结,过程实时显示。
+2. 贴视频链接、选总结模板(默认「通用」)、点「分析」。音乐单曲链接(网易云 / QQ 音乐 / Apple Music)也直接贴 —— 自动走音乐剪藏,模板与详细度对它不适用。视图驱动「青鸟收藏夹」Agent:抓字幕 → 出 Markdown 总结,过程实时显示。
 3. 分析完自动存成 Amadeus 笔记(`{工作文件夹}/{日期}-{标题}.md`,连同来源信息),之后可全库检索;按钮变成「打开笔记」直达。
 4. 想追问 / 翻译:继续在视图里问,或在 Tangu 里直接和「青鸟收藏夹」Agent 对话。
 

@@ -2,7 +2,7 @@
   "id": "bluebird",
   "name": "青鸟收藏夹",
   "nameEn": "Bluebird",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "apiVersion": 1,
   "description": "视频内容分析:贴一条 Bilibili / YouTube / 抖音 / 小红书 链接,在工作台里抓字幕、出结构化 Markdown 总结,分析完自动存进 Amadeus 笔记库。转录与 AI 全走本机 Tangu(「青鸟收藏夹」Agent + 「青鸟视频分析」技能,基于 yt-dlp,总结由 Tangu 直连 Forsion 完成),数据不出本机。文章、文档这类普通链接不必开工作台:在任意 Tangu 对话里丢过去说一句「存一下」,「青鸟链接收藏」技能就会抓正文、写成笔记存进库里的 Links/。",
   "descriptionEn": "Video analysis for your notes: paste a Bilibili / YouTube / Douyin / Xiaohongshu link, and Bluebird pulls the transcript, writes a structured Markdown summary in the workbench, and files it in your Amadeus vault. Transcription and AI both run through Tangu on this machine (the Bluebird agent plus its Bluebird Video Analysis skill, built on yt-dlp; the summary goes straight from Tangu to Forsion), so the data never leaves your computer. Ordinary links — articles, docs, papers — skip the workbench entirely: drop one into any Tangu chat with \"save this\" and the Bluebird Link Capture skill fetches the page, writes a note and files it under Links/ in your vault. It confirms first by default; turn on \"Enhanced auto mode\" in this page's settings and a link sent on its own is filed straight away.",
