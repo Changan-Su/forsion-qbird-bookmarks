@@ -30,7 +30,7 @@ const anyAttr = (node, key) => { let hit = false; const walk = (n) => { if (n.at
 
 // ── 求值 main.js ──
 globalThis.__BLUEBIRD_TEST__ = {}
-const reg = { views: [], commands: [], settings: [], status: [] }
+const reg = { views: [], commands: [], settings: [], status: [], listSources: [] }
 // 语言广播垫片 = 宿主 pluginStore.subscribeLocale 的形状(返回退订函数);emitLocale() 手动播一次。
 const localeSubs = new Set()
 const emitLocale = () => { for (const f of Array.from(localeSubs)) f() }
@@ -38,6 +38,7 @@ const OPENED = { openFile: [], loadPage: [] } // 打开笔记走了哪条路,由
 const VAULT = { root: '/Users/x/My Vault' }  // 带空格:存档目录拼出来必须原样带着
 const ctx = {
   registerView: (v) => reg.views.push(v), registerCommand: (c) => reg.commands.push(c),
+  registerListSource: (x) => reg.listSources.push(x), // 统一左栏数据源(宿主 2026-08-25+)
   // 宿主同款:设置**同 key 覆盖**(pluginStore.registerSetting 先按 pluginId+key filter 再 append)
   registerSetting: (s) => { reg.settings = reg.settings.filter((o) => o.key !== s.key); reg.settings.push(s) },
   // 宿主同款:状态栏返回 update/dispose 句柄,update 原位改
@@ -56,7 +57,10 @@ ctx.app.writeFile = async (p, t) => { V.set(p, t); writes.push(p) }
 // ── 贡献点契约 ──
 A.equal(typeof dispose, 'function', 'setup 应返回 disposer')
 A.ok(reg.views.find((v) => v.id === 'folder' && typeof v.mount === 'function'), '应注册 folder 视图')
-A.ok(reg.views.find((v) => v.id === 'library' && typeof v.mount === 'function'), '应注册 library 视图(Space 引用它)')
+// 2.0.0:自绘 library 视图已移除 —— 收藏夹左栏改由宿主统一工作区视图渲染本插件的列表源,
+// 只此一套 UI(两套并存会让用户在旧布局里看到旧面)。这里反过来断言它**不再注册**。
+A.ok(!reg.views.find((v) => v.id === 'library'), '不应再注册自绘 library 视图(左栏已统一)')
+A.ok(reg.listSources && reg.listSources.find((x) => x.id === 'library-list'), '应注册 library-list 列表源(统一左栏数据源)')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-open'), '应注册 bluebird-open 命令')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-library'), '应注册 bluebird-library 命令')
 A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail', 'saveMedia'], '应声明四个设置(存储夹已改用宿主标准 workFolder)')
@@ -68,7 +72,7 @@ A.ok(!_ls.has('plugin.bluebird.saveFolder'), '迁移后旧 saveFolder 键应删�
 
 // ── 纯函数 ──
 const T = globalThis.__BLUEBIRD_TEST__
-for (const k of ['inline', 'renderMarkdown', 'safeHref', 'deriveTitle', 'sanitizeFileName', 'today', 'parsePlatform', 'extractUrl', 'isSupported', 'parseAgentOutput', 'fmtTime', 'toSRT', 'toTXT', 'toObsidian', 'onColorOf', 'readableOn', 'contrast']) {
+for (const k of ['inline', 'renderMarkdown', 'linkifyTimestamps', 'safeHref', 'deriveTitle', 'sanitizeFileName', 'today', 'parsePlatform', 'extractUrl', 'isSupported', 'parseAgentOutput', 'fmtTime', 'toSRT', 'toTXT', 'toObsidian', 'onColorOf', 'readableOn', 'contrast']) {
   A.equal(typeof T[k], 'function', `钩子应暴露 ${k}`)
 }
 
@@ -166,6 +170,36 @@ A.ok(/player\.bilibili\.com\/player\.html\?bvid=BV1xx411c7mD/.test(bili.embed(0)
 A.ok(/&t=90&autoplay=1/.test(bili.embed(90)), 'Bilibili seek 应带 &t= 并即播')
 A.ok(/autoplay=0/.test(bili.embed(0)), 'Bilibili 首载不自动播放')
 A.equal(T.isSupported('https://youtu.be/abc'), true)
+
+// 分享页地址(写进笔记正文的时间戳链接用它;播放器地址只给我们自己端内的 iframe)
+A.ok(/youtube\.com\/watch\?v=dQw4w9WgXcQ&t=90s/.test(yt.watch(90)), 'YouTube watch() 应给分享页 + t=90s')
+A.ok(!/t=/.test(yt.watch(0)), 't=0 不必写进链接')
+A.ok(/bilibili\.com\/video\/BV1xx411c7mD\?t=90/.test(bili.watch(90)), 'Bilibili watch() 应给分享页 + ?t=90')
+A.ok(!/player\.bilibili/.test(bili.watch(90)), '⚠️ 播放器地址绝不能写进笔记(离开我们端内就是个裸播放器页)')
+
+// ── [MM:SS] 升格成锚点(青鸟升级的核心:此前是纯文本,只在青鸟自绘视图里可点) ──
+{
+  const md = '# 标题\n\n[01:35] 讲到缓存\n\n[1:02:30] 收尾\n'
+  const online = T.linkifyTimestamps(md, bili.watch, '')
+  A.ok(/\[01:35\]\(https:\/\/www\.bilibili\.com\/video\/BV1xx411c7mD\?t=95\)/.test(online), '在线源应升格成标准 md 链接')
+  A.ok(/\[1:02:30\]\(.*t=3750\)/.test(online), 'HH:MM:SS 也要认')
+
+  const local = T.linkifyTimestamps(md, bili.watch, '存档.m4a')
+  A.ok(/\[\[存档\.m4a#t=95\|01:35\]\]/.test(local), '已存档本地素材应走宿主 wiki 锚(可就地 seek)')
+  A.ok(!/https:/.test(local), '有本地存档时不该再写外链')
+
+  // 围栏内不许动:日志/数组下标里的 [00:12] 不是时间戳
+  const fenced = T.linkifyTimestamps('```\n[00:12] log line\n```\n\n[00:12] 正文\n', bili.watch, '')
+  A.ok(/```\n\[00:12\] log line\n```/.test(fenced), '⚠️ 代码围栏内的 [MM:SS] 必须原样保留')
+  A.ok(/\[00:12\]\(https:/.test(fenced), '围栏外的仍要升格')
+
+  // 已经是链接的不许二次包装(会把语法拧坏)
+  const already = T.linkifyTimestamps('[01:35](https://x.com/a) 尾巴\n', bili.watch, '')
+  A.equal(already.trim(), '[01:35](https://x.com/a) 尾巴', '已是链接的时间戳应原样不动')
+
+  // 无 watch()(抖音/小红书/音乐三家)→ 原样保留,绝不造死链接
+  A.equal(T.linkifyTimestamps('[01:35] x\n', null, '').trim(), '[01:35] x', '没有分享页地址时原样保留')
+}
 A.equal(T.isSupported('https://example.com/x'), false)
 
 // 音乐三家:识别得出、都不内嵌(宿主 CSP frame-src 没放行音乐播放器)、进得了输入框
@@ -252,6 +286,46 @@ A.ok(V.has('青鸟收藏夹/.bluebird-index.json'), '新宿主按工作文件夹
 const wN = writes.length
 await T.ensureWorkFolder()
 A.equal(writes.length, wN, '已有索引不重复写(幂等)')
+
+// ── 2.0.3 回归闸:订阅时必须重读索引(「明明有记录列表却是空」的根因) ──
+// 插件是在宿主**启动期**被激活的,那一刻 vault 根还没恢复(宿主的 vault 引导是懒的),
+// 顶层那次 listReload 拿到的是 readFile 的**静默 null**(不抛),lidx 就此定格为空,
+// 此后只有 'saved' 才救得回来 —— 冷启进青鸟 Space 谁也不存东西,于是列表恒空。
+// 宿主挂载列表面/切库都会重订阅,所以 subscribe() 是重读的正确门。
+{
+  const LS = reg.listSources.find((x) => x.id === 'library-list')
+  V.set(`${T.folderRoot()}/.bluebird-index.json`, JSON.stringify({ folders: [], items: [
+    { id: 'boot1', title: '库落地之后才读得到', platform: 'bilibili', date: '2026-08-28' },
+  ] }))
+  A.ok(!LS.items({}).some((r) => r.key === 'boot1'), '前提:此刻列表源还没读过这份新索引')
+  const off = LS.subscribe(() => {})
+  await new Promise((r) => setTimeout(r, 10))
+  A.ok(LS.items({}).some((r) => r.key === 'boot1'), 'subscribe() 必须触发一次 listReload,否则启动期读空的列表永远回不来')
+  A.equal(typeof off, 'function', 'subscribe() 仍须返回退订函数')
+  off()
+}
+
+// ── 2.0.2 列表源行首图标:平台官方 favicon(iconUrl),取不到才退词表键 ──
+// lidx 是列表源的闭包私有态,外面只能借一条**会 listReload** 的动作把索引灌进去:
+// 删一个不存在的 key = 索引原样重写 + reload,无副作用。
+{
+  const LS = reg.listSources.find((x) => x.id === 'library-list')
+  V.set(`${T.folderRoot()}/.bluebird-index.json`, JSON.stringify({ folders: [], items: [
+    { id: 'i1', title: 'B 站视频', platform: 'bilibili', date: '2026-08-28' },
+    { id: 'i2', title: '网易云单曲', platform: 'netease', date: '2026-08-28' },
+    { id: 'i3', title: '不认识的来源', platform: '', date: '2026-08-28' },
+  ] }))
+  LS.itemMenu({ key: '__absent__' }).find((a) => a.id === 'delete').run()
+  await new Promise((r) => setTimeout(r, 10))
+  const rows = LS.items({})
+  const by = (k) => rows.find((r) => r.key === k)
+  A.equal(rows.length, 3, '列表源应投出三条(索引已灌进去)')
+  A.equal(by('i1').iconUrl, 'https://www.bilibili.com/favicon.ico', 'bilibili 条目应带平台官方 favicon')
+  A.equal(by('i2').iconUrl, 'https://s1.music.126.net/style/favicon.ico', '音乐平台同样走 favicon,不是只有视频站')
+  A.equal(by('i3').iconUrl, undefined, '无平台的条目不给 iconUrl —— 留空才会退到词表图标')
+  A.equal(by('i1').icon, 'link', '词表键必须仍在:老宿主不认 iconUrl,靠它兜底')
+  A.equal(by('i2').icon, 'bookmark', '音乐的词表兜底仍是书签')
+}
 
 // ── 双语(1.5.0)①词表:两侧键集合必须完全相等;en 侧不许留中文;占位符两侧对齐 ──
 const zhKeys = Object.keys(T.MSG.zh).sort(), enKeys = Object.keys(T.MSG.en).sort()

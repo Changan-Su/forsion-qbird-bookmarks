@@ -284,18 +284,31 @@ function fmtTime(sec) {
   return h ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`
 }
 
-/** 平台识别 + 可嵌入播放器地址(宿主 CSP frame-src 放行 youtube-nocookie 与 player.bilibili.com,
- *  故 YouTube / Bilibili 可内嵌,照原版 video-player;seek(t>0)带 autoplay=1,点时间戳即跳即播)。 */
+/** 平台识别 + 两种地址:
+ *  - `embed(t)` = **可内嵌的播放器**地址(宿主 CSP frame-src 只放行 youtube-nocookie 与
+ *    player.bilibili.com);青鸟自己的 folder 视图用它。
+ *  - `watch(t)` = **分享页**地址,写进笔记正文的时间戳链接用它。两者不能混:播放器 URL 写进
+ *    笔记 = 用户在 Obsidian / 浏览器里点开是个裸播放器页,而 CSP 白名单只在我们自己端内有效。
+ *  ⚠️ 两家都**没有运行期 seek 通道**(B 站无官方 postMessage;YouTube IFrame API 要正确 origin,
+ *  而渲染层 file:// 的 origin 是 "null")—— 换时刻只能重挂播放器,这是外部约束不是我们能修的。 */
 function parsePlatform(url) {
   const u = String(url || '')
   let m
   if ((m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/))) {
     const id = m[1]
-    return { platform: 'youtube', videoId: id, embed: (t) => `https://www.youtube-nocookie.com/embed/${id}?rel=0${t ? `&start=${Math.floor(t)}&autoplay=1` : ''}` }
+    return {
+      platform: 'youtube', videoId: id,
+      embed: (t) => `https://www.youtube-nocookie.com/embed/${id}?rel=0${t ? `&start=${Math.floor(t)}&autoplay=1` : ''}`,
+      watch: (t) => `https://www.youtube.com/watch?v=${id}${t ? `&t=${Math.floor(t)}s` : ''}`,
+    }
   }
   if ((m = u.match(/bilibili\.com\/video\/(BV[\w]+)/i)) || (m = u.match(/\b(BV[\w]{10})\b/))) {
     const id = m[1]
-    return { platform: 'bilibili', videoId: id, embed: (t) => `https://player.bilibili.com/player.html?bvid=${id}&page=1&high_quality=1&controls=1${t ? `&t=${Math.floor(t)}&autoplay=1` : '&autoplay=0'}` }
+    return {
+      platform: 'bilibili', videoId: id,
+      embed: (t) => `https://player.bilibili.com/player.html?bvid=${id}&page=1&high_quality=1&controls=1${t ? `&t=${Math.floor(t)}&autoplay=1` : '&autoplay=0'}`,
+      watch: (t) => `https://www.bilibili.com/video/${id}${t ? `?t=${Math.floor(t)}` : ''}`,
+    }
   }
   if (/xiaohongshu\.com|xhslink/.test(u)) return { platform: 'xiaohongshu', videoId: '', embed: null }
   if (/douyin\.com/.test(u)) return { platform: 'douyin', videoId: '', embed: null }
@@ -596,13 +609,51 @@ function openNotePath(path) {
   if (ctx.app && typeof ctx.app.loadPage === 'function') { ctx.app.loadPage(path); return }
   if (ctx.app && typeof ctx.app.openFile === 'function') ctx.app.openFile(path) // 老宿主没有 loadPage 时的兜底
 }
+/** 正文里独立的 `[MM:SS]` → 可点锚点链接。**这是青鸟升级的核心一步**:此前它是纯文本,
+ *  只在青鸟自绘的视图里可点;换成标准 md 链接后,在笔记正文、收件箱、聊天引用条、甚至别人的
+ *  Obsidian 里都是活的。
+ *  - 已存档本地素材 → `[[文件名#t=95|01:35]]`(宿主 wiki 锚,能就地 seek 顶部播放器)
+ *  - 在线源 → `[01:35](分享页?t=95)`(标准 md 链接,任何编辑器都点得开)
+ *  ⚠️ 跳过代码块(``` 围栏内的 `[00:12]` 可能是日志/数组下标,不是时间戳),也跳过已经在
+ *  链接文本位里的那些(`[[01:35]](…)` 会把语法拧坏)。 */
+function linkifyTimestamps(md, watch, localName) {
+  const lines = String(md || '').split('\n')
+  let fence = false
+  return lines.map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line }
+    if (fence) return line
+    return line.replace(/(\]\()?\[(\d{1,2}:\d{2}(?::\d{2})?)\](\()?/g, (whole, before, ts, after) => {
+      if (before || after) return whole // 已经是链接的一部分,别碰
+      const sec = parseTs(ts)
+      if (sec == null) return whole
+      if (localName) return `[[${localName}#t=${sec}|${ts}]]`
+      const href = watch ? watch(sec) : ''
+      return href ? `[${ts}](${href})` : whole
+    })
+  }).join('\n')
+}
+
 async function saveEntry(full) {
   const id = full.id || uuid()
   const idx = await readIndex()
   const title = deriveTitle(full.summaryMarkdown)
   const notePath = `${folderRoot()}/${today()}-${sanitizeFileName(title)}.md`
   const header = t('noteHeader', { url: full.sourceUrl || (full.meta && full.meta.videoUrl) || '', date: today() })
-  await ctx.app.writeFile(notePath, header + full.summaryMarkdown)
+  const src = full.sourceUrl || (full.meta && full.meta.videoUrl) || ''
+  const plat = parsePlatform(src)
+  // 已存档的本地素材优先:走宿主的 `#t=` 锚 = 真·就地 seek(不重挂播放器、不联网)。
+  // 存档件在正文里的形态就是 `![[文件名]]`(开了「存原始素材」时由技能写出,落在收藏夹 assets/)。
+  // 没有独立字段可读,所以从正文里认第一条音视频存档件 —— 宿主按裸 basename 全库定位。
+  const localName = (/!\[\[([^\]|#]+\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v))\]\]/i
+    .exec(full.summaryMarkdown || '') || [])[1] || ''
+  // frontmatter:笔记 ↔ 收藏条目的双向可寻址(索引里存 notePath,笔记里存 bluebird_id);
+  // 没有它,"这篇笔记是哪条收藏" 只能靠遍历旁挂 json 反查。
+  const fm = ['---', `bluebird_id: ${id}`, `source: ${src}`, `platform: ${(full.meta && full.meta.platform) || plat.platform || ''}`, '---', ''].join('\n')
+  // 顶部播放器块:在线源写裸 URL 一行(宿主的书签卡就地渲成播放器),已存档写 wiki 嵌入。
+  // 有了它,"点正文时间戳 → 本笔记内的播放器就地跳过去" 这条最舒服的路径天然成立。
+  const player = localName ? `![[${localName}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
+  const body = linkifyTimestamps(full.summaryMarkdown, plat.watch, localName)
+  await ctx.app.writeFile(notePath, fm + header + player + body)
   await ctx.app.writeFile(dataPath(id), JSON.stringify({ ...full, id, notePath, date: today(), generatedAt: full.generatedAt || new Date().toISOString() }))
   const m = full.meta || {}
   idx.items = [{ id, title, platform: m.platform || '', videoId: m.videoId || '', videoUrl: full.sourceUrl || m.videoUrl || '', folderId: full.folderId || null, date: today(), duration: m.duration || 0, author: m.author || '', thumbnail: m.thumbnail || '' }, ...idx.items.filter((it) => it.id !== id)]
@@ -966,136 +1017,6 @@ function themeObserver(root) {
 const say = (m, o) => (ctx.notify ? ctx.notify(m, o) : ctx.app.notify(m))
 
 // ══ 收藏夹视图 ══════════════════════════════════════════════════════════════
-function mountLibrary(el) {
-  el.innerHTML = ''
-  const style = document.createElement('style'); style.textContent = STYLE; el.appendChild(style)
-  const root = document.createElement('div'); root.className = 'bb-root'
-  el.appendChild(root)
-  const off = themeObserver(root)
-  const $ = (s) => root.querySelector(s)
-  let foldersEl = null, listEl = null, searchEl = null
-  let idx = { folders: [], items: [] }, activeFolder = 'all', query = ''
-
-  /** 整块骨架重画:语言变更时重来一次(**不重挂视图**,状态 idx/activeFolder/query 原地留着)。
-   *  骨架里的字全是词表里的编译期字面量,用户数据一律走 textContent(见 renderFolders/renderList)。 */
-  function paint() {
-    root.innerHTML = `
-<div class="bb-lib">
-  <div class="bb-lib-hd">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="font-size:18px">🐦</span><b data-appname></b></div>
-    <button class="bb-btn" style="width:100%" data-new></button>
-  </div>
-  <div class="bb-lib-body">
-    <div class="bb-sec"><span class="bb-label" data-t-folders></span><span class="bb-btn ghost sm" data-newfolder></span></div>
-    <div data-folders></div>
-    <div class="bb-sec" style="margin-top:14px"><span class="bb-label" data-t-history></span></div>
-    <input class="bb-input" data-search style="margin-bottom:6px;padding:6px 10px;font-size:12px" />
-    <div data-list></div>
-  </div>
-</div>`
-    $('[data-appname]').textContent = t('appName')
-    $('[data-new]').textContent = t('libNew')
-    $('[data-t-folders]').textContent = t('libFolders')
-    $('[data-t-history]').textContent = t('libHistory')
-    $('[data-newfolder]').textContent = t('libAddFolder') // 全角＋在拉丁文本里撑一格,英文侧走半角
-    $('[data-newfolder]').title = t('promptNewFolder')
-    foldersEl = $('[data-folders]'); listEl = $('[data-list]'); searchEl = $('[data-search]')
-    searchEl.placeholder = t('libSearch'); searchEl.value = query
-    searchEl.addEventListener('input', () => { query = searchEl.value; renderList() })
-    $('[data-new]').addEventListener('click', () => { pendingOpen = { fresh: true }; bus.emit({ type: 'open', fresh: true }); ctx.openView('folder') })
-    $('[data-newfolder]').addEventListener('click', async () => { const name = await askStr(t('promptNewFolder'), ''); if (name) { idx.folders.push({ id: uuid(), name }); await writeIndex(idx); render() } })
-    render()
-  }
-
-  const counts = () => { const c = {}; for (const it of idx.items) { const k = it.folderId || '__none'; c[k] = (c[k] || 0) + 1 } return c }
-  /** 历史项拖进文件夹归档(照原版侧栏 drag&drop;右键菜单「移动到…」保留)。 */
-  const wireDrop = (d, folderId) => {
-    d.addEventListener('dragover', (e) => { if (e.dataTransfer && e.dataTransfer.types.includes('bluebird/id')) { e.preventDefault(); d.classList.add('active') } })
-    d.addEventListener('dragleave', () => d.classList.remove('active'))
-    d.addEventListener('drop', async (e) => {
-      e.preventDefault(); d.classList.remove('active')
-      const id = e.dataTransfer && e.dataTransfer.getData('bluebird/id'); if (!id) return
-      const it = idx.items.find((x) => x.id === id); if (!it) return
-      it.folderId = folderId; await writeIndex(idx); render()
-    })
-  }
-  function renderFolders() {
-    foldersEl.innerHTML = ''; const c = counts()
-    // 文件夹名是用户输入 → 一律 textContent 拼装,不进 innerHTML
-    const mk = (id, name, n) => {
-      const d = document.createElement('div'); d.className = 'bb-fold' + (activeFolder === id ? ' active' : '')
-      const ico = document.createElement('span'); ico.textContent = id === 'all' ? '📚' : id === 'none' ? '🗂' : '📁'
-      const nm = document.createElement('span'); nm.textContent = esc(name)
-      const cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.textContent = String(n)
-      d.appendChild(ico); d.appendChild(nm); d.appendChild(cnt)
-      d.addEventListener('click', () => { activeFolder = id; render() }); return d
-    }
-    foldersEl.appendChild(mk('all', t('libAll'), idx.items.length))
-    const none = mk('none', t('libNone'), c['__none'] || 0); wireDrop(none, null); foldersEl.appendChild(none)
-    for (const f of idx.folders) {
-      const d = mk(f.id, f.name, c[f.id] || 0)
-      wireDrop(d, f.id)
-      const menu = document.createElement('span'); menu.className = 'bb-btn ghost sm'; menu.textContent = '⋯'; menu.style.marginLeft = '4px'
-      menu.addEventListener('click', (e) => { e.stopPropagation(); folderMenu(f, menu) })
-      d.appendChild(menu); foldersEl.appendChild(d)
-    }
-  }
-  function renderList() {
-    listEl.innerHTML = ''
-    let items = idx.items
-    if (activeFolder === 'none') items = items.filter((it) => !it.folderId)
-    else if (activeFolder !== 'all') items = items.filter((it) => it.folderId === activeFolder)
-    if (query) items = items.filter((it) => (it.title || '').toLowerCase().includes(query.toLowerCase()))
-    if (!items.length) {
-      const em = document.createElement('div'); em.className = 'bb-empty'
-      em.textContent = idx.items.length ? t('libNoMatch') : t('libEmpty')
-      listEl.appendChild(em); return
-    }
-    for (const it of items) {
-      const card = document.createElement('div'); card.className = 'bb-card'
-      const row = document.createElement('div'); row.className = 'bb-item'
-      const ic = platIcon(it.platform, 16); ic.style.marginTop = '2px'
-      const col = document.createElement('div'); col.style.minWidth = '0'
-      const ttl = document.createElement('div'); ttl.className = 'ttl'; ttl.textContent = it.title || t('libUntitled')
-      const dt = document.createElement('div'); dt.className = 'dt'
-      dt.textContent = [it.date === today() ? t('today') : fmtDate(it.date), it.duration ? fmtTime(it.duration) : '', it.author || ''].filter(Boolean).join(' · ')
-      col.appendChild(ttl); col.appendChild(dt); row.appendChild(ic); row.appendChild(col); card.appendChild(row)
-      card.draggable = true
-      card.addEventListener('dragstart', (e) => { if (e.dataTransfer) { e.dataTransfer.setData('bluebird/id', it.id); e.dataTransfer.effectAllowed = 'move' } })
-      card.addEventListener('click', () => { pendingOpen = { entryId: it.id }; bus.emit({ type: 'open', entryId: it.id }); ctx.openView('folder') })
-      card.addEventListener('contextmenu', (e) => { e.preventDefault(); itemMenu(it, e.clientX, e.clientY) })
-      listEl.appendChild(card)
-    }
-  }
-  function render() { renderFolders(); renderList() }
-
-  function folderMenu(f, anchor) {
-    closeMenus()
-    const box = document.createElement('div'); box.className = 'bb-menu'
-    const r = anchor.getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = (r.bottom + 4) + 'px'
-    const add = (label, fn) => { const d = document.createElement('div'); d.textContent = label; d.addEventListener('click', fn); box.appendChild(d) }
-    add(t('menuRename'), async () => { closeMenus(); const name = await askStr(t('promptFolderName'), f.name); if (name) { f.name = name; await writeIndex(idx); render() } })
-    add(t('menuDelete'), async () => { closeMenus(); idx.folders = idx.folders.filter((x) => x.id !== f.id); idx.items.forEach((it) => { if (it.folderId === f.id) it.folderId = null }); await writeIndex(idx); if (activeFolder === f.id) activeFolder = 'all'; render() })
-    showMenu(box)
-  }
-  function itemMenu(it, x, y) {
-    closeMenus()
-    const box = document.createElement('div'); box.className = 'bb-menu'; box.style.left = x + 'px'; box.style.top = y + 'px'
-    const add = (label, fn) => { const d = document.createElement('div'); d.textContent = label; d.addEventListener('click', fn); box.appendChild(d) }
-    add(t('menuMove'), async () => { closeMenus(); const names = [t('libNone'), ...idx.folders.map((f) => f.name)]; const pick = await askStr(t('promptMoveTo', { names: names.join(' / ') }), ''); if (pick == null) return; const f = idx.folders.find((x) => x.name === pick); it.folderId = f ? f.id : null; await writeIndex(idx); render() })
-    add(t('menuDelete'), async () => { closeMenus(); idx.items = idx.items.filter((x) => x.id !== it.id); await writeIndex(idx); render() })
-    showMenu(box)
-  }
-
-  const offBus = bus.on((e) => { if (e.type === 'saved') refresh() })
-  async function refresh() { idx = await readIndex(); render() }
-  // 语言变更:原地重画(判定标准就是「视图不重挂也要变英文」);浮层里的旧语言菜单先收掉
-  const offLocale = ctx.subscribeLocale ? ctx.subscribeLocale(() => { closeMenus(); paint() }) : null
-  paint()
-  ensureWorkFolder().then(refresh)
-  return () => { off(); offBus(); if (offLocale) offLocale(); closeMenus() }
-}
-
 let _menuCleanup = null
 function closeMenus() { root_all('.bb-menu').forEach((m) => m.remove()) }
 function root_all(sel) { return Array.from(document.querySelectorAll(sel)) }
@@ -1548,10 +1469,96 @@ function mountAnalyze(el) {
 // ⚠️ 视图标签页 / 命令面板的标题是**单字符串**,宿主那两处是直接 append 不去重(pluginStore registerView/registerCommand),
 //    重注册会长出重复项 —— 所以它们取的是**注册那一刻**的语言,切语言后要等重启才跟上(不许为它做重注册/自我 teardown)。
 //    两个例外,下面订了语言就地更新:状态栏有 update() 句柄;设置项是**同 key 覆盖**,重注册一次即可。
-ctx.registerView({ id: 'library', title: t('viewLibrary'), mount: mountLibrary, singleton: true })
-ctx.registerView({ id: 'folder', title: t('viewFolder'), mount: mountAnalyze, singleton: true })
+// workspaceSource(2026-08-25 宿主 P2):folder/library 做主视图时,统一工作区左栏自动切到下面的
+// 收藏条目列表源(仅在左栏是统一 workspace 视图的 Space 生效;青鸟自己的 Space 左栏=完整 library 面,不受影响)。
+ctx.registerView({ id: 'folder', title: t('viewFolder'), mount: mountAnalyze, singleton: true, workspaceSource: 'library-list' })
+// 统一左栏列表源(宿主 2026-08-25+ 才有;老宿主可选调用即静默跳过):收藏条目的**平面投影**——
+// 完整体验(搜索/文件夹管理/卡片/新建)仍在 library 视图,这里只供统一工作区联动列条目、一键打开。
+if (ctx.registerListSource) {
+  // ── 统一左栏数据源(宿主 2026-08-25+):把收藏夹整面交给统一工作区 UI 渲染 ──
+  // 青鸟只出**数据与动作**,不出 UI:搜索词/选中文件夹由宿主持有并经 items({query,group}) 回传,
+  // 故这里对界面状态完全无状态。空间配方(spaces/bluebird/space.json)左栏因此改用 workspace 视图。
+  let lidx = { folders: [], items: [] }
+  const listSubs = new Set()
+  const fire = () => listSubs.forEach((f) => { try { f() } catch { /* ignore */ } })
+  const listReload = async () => {
+    try { lidx = (await readIndex()) || { folders: [], items: [] } } catch { lidx = { folders: [], items: [] } }
+    fire()
+  }
+  void listReload()
+  // 收藏落盘 / 条目改动即刷新(队列进度噪音不重载)
+  bus.on((e) => { if (e.type === 'saved') void listReload() })
+  const NONE = '__none' // 「未分类」的分组键(folderId 为空的条目)
+  ctx.registerListSource({
+    id: 'library-list',
+    title: t('viewLibrary'),
+    search: true,
+    items: (f) => {
+      const q = ((f && f.query) || '').trim().toLowerCase()
+      const g = f && f.group
+      return (lidx.items || [])
+        .filter((it) => (g == null ? true : g === NONE ? !it.folderId : it.folderId === g))
+        .filter((it) => !q || String(it.title || '').toLowerCase().includes(q) || String(it.author || '').toLowerCase().includes(q))
+        .map((it) => ({
+          key: it.id,
+          title: it.title || it.videoUrl || t('libUntitled'),
+          hint: it.date || '',
+          // 行首图标:平台官方 favicon(与详情页/旧侧栏同一张 PLATFORM_FAVICON 表),
+          // 宿主 2026-08-28+ 认 iconUrl。取不到(老宿主 / 断网 / CDN 404)就退下面这行的
+          // 词表键 —— 词表无平台专属图标,故按**内容类型**分:音乐=书签、图文=图片、其余=链接。
+          iconUrl: PLATFORM_FAVICON[it.platform] || undefined,
+          icon: isMusic(it.platform) ? 'bookmark' : it.platform === 'xiaohongshu' ? 'image' : 'link',
+        }))
+    },
+    groups: () => {
+      const c = {}
+      for (const it of lidx.items || []) { const k = it.folderId || NONE; c[k] = (c[k] || 0) + 1 }
+      const out = (lidx.folders || []).map((f) => ({ key: f.id, title: f.name, count: c[f.id] || 0, icon: 'folder' }))
+      if (c[NONE]) out.push({ key: NONE, title: t('libNone'), count: c[NONE] })
+      return out
+    },
+    actions: [{ id: 'new', label: t('libNew'), run: () => { pendingOpen = { fresh: true }; bus.emit({ type: 'open', fresh: true }); ctx.openView('folder') } }],
+    groupActions: [{
+      id: 'new-folder',
+      label: t('promptNewFolder'),
+      run: () => { void (async () => {
+        const name = await askStr(t('promptNewFolder'), '')
+        if (!name) return
+        const idx = await readIndex(); idx.folders.push({ id: uuid(), name }); await writeIndex(idx); await listReload()
+      })() },
+    }],
+    itemMenu: (item) => [
+      { id: 'move', label: t('menuMove'), run: () => { void (async () => {
+        const idx = await readIndex()
+        const names = [t('libNone'), ...(idx.folders || []).map((f) => f.name)]
+        const pick = await askStr(t('promptMoveTo', { names: names.join(' / ') }), '')
+        if (pick == null) return
+        const f = (idx.folders || []).find((x) => x.name === pick)
+        const hit = (idx.items || []).find((x) => x.id === item.key)
+        if (!hit) return
+        hit.folderId = f ? f.id : null
+        await writeIndex(idx); await listReload(); bus.emit({ type: 'saved' })
+      })() } },
+      { id: 'delete', label: t('menuDelete'), run: () => { void (async () => {
+        const idx = await readIndex()
+        idx.items = (idx.items || []).filter((x) => x.id !== item.key)
+        await writeIndex(idx); await listReload(); bus.emit({ type: 'saved' })
+      })() } },
+    ],
+    // ⚠️订阅时**必重读一次**:插件是在宿主**启动期**激活的(bootstrapEngine 装插件),而 vault 根的
+    //   恢复是懒的(ensureAmadeusReady,要等笔记/聊天类视图挂载)—— 上面那次 listReload 几乎必然
+    //   撞在「还没有活动库」上,宿主 readFile 此时**静默返回 null**(不抛),于是 lidx 恒空、列表恒空,
+    //   只有下一次 'saved' 才救得回来。1.7.x 的自绘面没这毛病:它是每次 mount 都 refresh 一遍。
+    //   宿主挂载/切库都会重订阅(WorkspaceView 的 effect 以 vaultRoot 为键),这里顺势重读。
+    subscribe: (cb) => { listSubs.add(cb); void listReload(); return () => listSubs.delete(cb) },
+    open: (item) => { pendingOpen = { entryId: item.key }; bus.emit({ type: 'open', entryId: item.key }); ctx.openView('folder') },
+  })
+}
+
 ctx.registerCommand({ id: 'bluebird-open', title: t('cmdOpen'), keywords: 'bluebird 青鸟 视频 总结 字幕 video summary transcript', run: () => ctx.openView('folder') })
-ctx.registerCommand({ id: 'bluebird-library', title: t('cmdLibrary'), keywords: 'bluebird 青鸟 收藏 library history', run: () => ctx.openView('library') })
+// 「打开侧栏」= 打开工作台(青鸟 Space 的左栏配方本身就是统一工作区 + 本插件列表源)。
+// 自绘 library 视图已于 2.0.0 移除:收藏夹左栏只此一套 UI,用户不会再看到旧面。
+ctx.registerCommand({ id: 'bluebird-library', title: t('cmdLibrary'), keywords: 'bluebird 青鸟 收藏 library history', run: () => ctx.openView('folder') })
 const sb = ctx.registerStatusItem && ctx.registerStatusItem({ id: 'open', side: 'right', text: t('statusText'), title: t('statusTitle'), onClick: () => ctx.openView('folder') })
 const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
   if (sb && sb.update) sb.update({ text: t('statusText'), title: t('statusTitle') })
@@ -1559,7 +1566,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
 return () => { // 插件停用才断分析

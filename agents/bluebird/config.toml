@@ -1,6 +1,6 @@
 # 青鸟收藏夹 Agent。文件夹名 = slug(bluebird)。version 必须带引号(市场更新检查用正则读)。
 name = "青鸟收藏夹"
-version = "1.0.0"
+version = "1.1.0"
 description = "视频内容分析助手:给一条 Bilibili / YouTube / 抖音 / 小红书 链接,自动抓字幕、产结构化总结、答疑、翻译,并可一键存进笔记库。"
 model_reasoning_effort = "medium"
 # full-auto:桌面插件驱动的 run 无人值守,转录要跑本机 run_bash(yt-dlp),不能卡在逐条审批。

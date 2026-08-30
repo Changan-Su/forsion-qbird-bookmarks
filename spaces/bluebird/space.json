@@ -2,10 +2,10 @@
   "id": "bluebird",
   "name": { "zh": "青鸟收藏夹", "en": "Bluebird" },
   "icon": "video",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "layout": {
     "main": [{ "type": "plugin:bluebird:folder" }],
-    "left": [{ "type": "plugin:bluebird:library" }]
+    "left": [{ "type": "workspace", "params": { "mode": "plugin:bluebird:library-list" } }]
   },
-  "requires": { "views": ["plugin:bluebird:folder", "plugin:bluebird:library"] }
+  "requires": { "views": ["plugin:bluebird:folder"] }
 }
