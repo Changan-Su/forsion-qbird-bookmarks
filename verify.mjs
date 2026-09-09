@@ -28,7 +28,7 @@ const TOOLS = new Set(['add_muse_todo', 'amadeus_list_notes', 'amadeus_read_note
   'get_datetime', 'glob_files', 'inbox_send', 'kill_process', 'list_files', 'list_processes', 'log_event',
   'manage_agent', 'manage_schedule', 'muse_watch', 'pip_install', 'read_activity', 'read_file', 'read_log',
   'read_process_output', 'remember', 'run_background', 'run_python', 'search_files', 'start_discussion',
-  'todo_read', 'todo_write', 'use_skill', 'wait_discussion', 'web_fetch', 'web_search', 'wechat_send_file',
+  'todo_read', 'todo_write', 'transcribe_audio', 'use_skill', 'wait_discussion', 'web_fetch', 'web_search', 'wechat_send_file',
   'wechat_send_image', 'write_file', 'write_process_input', 'run_bash'])
 
 function parseFrontmatter(raw) {
@@ -175,6 +175,8 @@ console.log('\n== Space ==')
       if (!Array.isArray(s.layout?.main) || s.layout.main.length < 1) errs.push('layout.main 必须 ≥1 视图')
       const used = new Set()
       for (const pane of ['main', 'left', 'right']) for (const v of s.layout?.[pane] || []) {
+        // Bluebird 2.0 uses the real host workspace list; it is not a plugin view.
+        if (v.type === 'workspace') continue
         used.add(v.type)
         if (!PLUGIN_VIEW.test(v.type)) errs.push(`视图 "${v.type}" 不是合法插件视图型(本 space 只用插件视图)`)
       }

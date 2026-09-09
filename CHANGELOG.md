@@ -1,5 +1,11 @@
 # 更新日志
 
+## 2.1.0 — 2026-09-09
+
+- 新增「收藏链接」:使用宿主的本地笔记库时,无需 Forsion Server、账号、Tangu 引擎或网络即可收藏链接、打开记录。链接详情显示收藏时间与原始地址,不会伪装成视频总结或已抓取的正文。
+- 支持 Unit / Web 宿主提供的资源 URL、本机路径和执行能力。视频分析缺少引擎、音频转写或本机执行能力时显示真实原因;云端库地址不会再被当成本机目录。
+- **English:** Added **Save link** for local vaults without Forsion Server, an account, Tangu or network access. Bookmarks show their saved time and source without claiming a video summary or fetched page content. Unit / Web media and execution use explicit host capabilities, with clear errors when analysis requirements are unavailable.
+
 ## 2.0.3 — 2026-08-28
 
 **修:收藏夹左栏「明明有记录却是空」**。冷启动之后打开收藏夹,列表一条不显示——索引文件好好地躺在工作文件夹里,里面的条目一条不少。

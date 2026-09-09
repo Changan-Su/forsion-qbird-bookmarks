@@ -1,8 +1,18 @@
-# 青鸟收藏夹(Forsion 桌面插件)
+# 青鸟收藏夹(Forsion 插件)
 
 把一条视频链接变成可读、可检索、可入库的知识笔记 —— 直接在 Forsion 工作台里完成。
 
-这是 [Bluebird Folder](https://github.com/) 视频分析应用的 Forsion 原生化:**插件本身只是「脸」**(一个 LCL 视图),真正干活的是本机的 **Tangu** —— 转录用开源 `yt-dlp`(无字幕则把音频交给 Forsion 自己的语音识别),总结/问答/翻译由 Tangu 直连 Forsion 的大模型完成。数据不出本机。
+**2.1.0:** 新增无需 Server 或引擎的本地链接收藏,并适配 Unit / Web 的资源与执行能力。**English:** Added local bookmarks without Server or an engine, plus Unit / Web host capability support. See [CHANGELOG.md](CHANGELOG.md).
+
+这是 Bluebird Folder 视频分析应用的 Forsion 原生插件:工作台视图与收藏数据使用宿主的 LCL / Amadeus 能力,分析任务使用宿主的 **Tangu** 引擎。转录用开源 `yt-dlp`,无字幕时需要宿主提供音频转写;总结、问答和翻译使用 Tangu 配置的模型。选择云端模型时,相关内容会发送给所选供应商。
+
+## Forsion Unit / Web
+
+- **收藏和阅读**:安装到提供本地 Amadeus 存储的 Unit 后,使用「收藏链接」即可把任意 HTTP(S) 链接存成笔记,并出现在正常的收藏列表中。不请求网页元数据、不调用模型、不要求 Forsion Server 或 Forsion 登录;断网时也能保存与重新打开。网页和视频本身仍可能需要网络。
+- **分析**:需要同一宿主提供 Tangu 本机执行能力、包内 Agent / 技能以及所需 Python / yt-dlp。未配置引擎时,收藏功能仍可用,分析会明确报告缺失能力。无字幕的视频还需要 ffmpeg 与宿主音频转写能力。
+- **资源**:插件通过 `ctx.app.assetUrl(relativePath)` 使用宿主统一资源 URL,通过 `ctx.app.hostPath(relativePath)` 获取同一执行宿主的真实素材目录。云端库地址和浏览器虚拟根不会被传给本机脚本。旧桌面宿主保留本地路径与资源协议回退。
+
+**English:** On a Unit with local Amadeus storage, **Save link** creates a normal library entry and Markdown note without a network request, model, Forsion Server or Forsion account. Existing entries remain readable offline. Video analysis additionally needs Tangu host execution, the bundled agent and skills, and Python / yt-dlp; videos without captions also need ffmpeg and host-provided audio transcription. Cloud models receive the content required for their tasks. Media URLs and execution paths come from the host APIs, so a cloud vault or virtual browser path is never treated as a local directory.
 
 ## 捆绑包(装一处,全就位)
 
@@ -25,7 +35,7 @@
 ## 用法
 
 1. 命令面板(⌘/Ctrl-K)「青鸟收藏夹:打开」,或状态栏图标 → 打开视图。
-2. 贴视频链接、选总结模板(默认「通用」)、点「分析」。音乐单曲链接(网易云 / QQ 音乐 / Apple Music)也直接贴 —— 自动走音乐剪藏,模板与详细度对它不适用。视图驱动「青鸟收藏夹」Agent:抓字幕 → 出 Markdown 总结,过程实时显示。
+2. 贴链接后可直接点「收藏链接」保存。需要分析时,贴视频链接、选总结模板(默认「通用」)、点「添加到分析队列」。音乐单曲链接(网易云 / QQ 音乐 / Apple Music)也直接贴 —— 自动走音乐剪藏,模板与详细度对它不适用。视图驱动「青鸟收藏夹」Agent:抓字幕 → 出 Markdown 总结,过程实时显示。
 3. 分析完自动存成 Amadeus 笔记(`{工作文件夹}/{日期}-{标题}.md`,连同来源信息),之后可全库检索;按钮变成「打开笔记」直达。
 4. 想追问 / 翻译:继续在视图里问,或在 Tangu 里直接和「青鸟收藏夹」Agent 对话。
 
@@ -50,7 +60,7 @@
 
 ## 边界
 
-- 依赖本机 Tangu 与 yt-dlp;纯离线的字幕视频最省心,ASR 需 Key + ffmpeg。
+- 在线视频抓取需要网络、Tangu 与 yt-dlp;音频转写是否需要云端 key 取决于宿主选用的本地模型或云供应商。仅收藏链接和阅读已有记录不依赖这些能力。
 - 超长视频的 ASR 分片并发(Bluebird 原有能力)本版未做,原生字幕无此限制。
 - 小红书等平台随 yt-dlp 支持度变化,抓取失败先升级 yt-dlp。
 

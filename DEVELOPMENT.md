@@ -2,7 +2,19 @@
 
 把 [Bluebird Folder](../../apps/Bluebird-Folder) 视频分析应用做成 **Forsion Genesis 的原生插件** —— 调用 LCL 引擎(工作台视图)与 Tangu 生态(引擎 + 技能),而不是搬一个独立 Web 应用进来。
 
-贴一条视频链接(Bilibili / YouTube / 抖音 / 小红书),在 Forsion 工作台里抓字幕、出结构化 Markdown 总结、追问、翻译,并一键存进 Amadeus 笔记库。**转录/AI 全在本机**,数据不出机。
+贴一条视频链接(Bilibili / YouTube / 抖音 / 小红书),在 Forsion 工作台里抓字幕、出结构化 Markdown 总结、追问、翻译,并存进 Amadeus 笔记库。任务由宿主 Tangu 执行;模型数据流取决于其供应商配置。仅收藏链接不需要 Tangu 或网络。
+
+### Unit / Web 宿主契约(2026-09-09)
+
+同一个 bundle 可由桌面或 Unit 的 Web 投射加载。纯收藏动作 `saveLink` 只调用 `ctx.app.readFile/writeFile`,不碰引擎、账号或 HTTP;笔记、sidecar 与索引沿用既有格式,链接条目的文件名包含唯一 id,避免同标题覆盖。
+
+- `ctx.app.assetUrl(vaultRelativePath): string` 复用宿主的资源 URL 构造器,保留 Unit 临时资源令牌/云端资产处理。
+- `ctx.app.hostPath(vaultRelativePath): string | null` 只返回与当前执行引擎同机的真实路径;null 表示素材不落本机,不能再拿 `vaultRoot()` 猜。
+- `window.tangu.executionCapabilities.host` 是显式 Unit / Web 本机执行能力声明;`getConfig()` 返回 Unit 代理地址与当前会话令牌。没有配置时不回落 `/api`,也不读取旧全局 `forsion_token`。
+- 旧桌面无新契约时保留原有引擎接入,素材目录只接受真实绝对路径,不会把 `cloud://` 当本机目录。
+- 不提供 `transcribeAudioFile` 的宿主会在无字幕分支显示真实能力缺口,不会把错误当作成功的总结。
+
+**English:** A single bundle serves Desktop and Unit Web projection. `saveLink` uses only the host's normal vault file APIs. Asset URLs, same-engine host paths and host execution availability are explicit capabilities; unavailable Unit configuration never falls back to another account's token. Audio transcription is optional and reports its absence when needed.
 
 ## 架构(捆绑包 bundle:一个目录,四件内容)
 
@@ -62,6 +74,8 @@ sh install.sh prod    # → ~/.forsion
 ```bash
 node verify.mjs      # 校验 skill/agent/plugin 契约 + 跑 plugin check.mjs(含 XSS 防护)+ transcribe.py 自检
 ```
+
+`check.mjs` 还断言零网络收藏/重新读取、同标题不覆盖、云端/虚拟路径拒绝、资源 URL 桥、本机执行门控及 Unit 会话令牌原样传递。验证器允许 Space 使用宿主的 `workspace` 视图,并识别现有 `transcribe_audio` 工具;它们是宿主能力,不是本插件捏造的贡献点。完整 Unit 浏览器验收还需要使用 Genesis 的独立安装产物,本脚本的内存文件桥不等同于真实持久化验证。
 
 **真身层(需真机,手动验收):** 转录要跑本机 yt-dlp + 真实网络,只能在跑着的桌面上验:`install.sh dev` → 重启 desktop → 命令面板「青鸟收藏夹:打开」→ 贴一条有字幕的视频(如任意 YouTube)→ 看总结直播出来 → 「保存到笔记」确认落到 `videos/`。
 
