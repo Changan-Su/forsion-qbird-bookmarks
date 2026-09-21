@@ -164,6 +164,7 @@ console.log('\n== Space ==')
     'message-circle', 'folder', 'folder-open', 'file-text', 'star', 'heart', 'home', 'target', 'zap', 'globe',
     'music', 'image', 'video', 'code', 'terminal', 'layout-grid', 'sparkles', 'boxes', 'list-tree'])
   const PLUGIN_VIEW = /^plugin:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$/
+  const NATIVE_VIEWS = new Set(['workspace', 'amadeus-editor', 'chat-panel'])
   for (const sd of lsDirs(path.join(ROOT, 'spaces'))) {
     try {
       const s = JSON.parse(readFileSync(path.join(ROOT, 'spaces', sd, 'space.json'), 'utf8'))
@@ -175,20 +176,22 @@ console.log('\n== Space ==')
       if (!Array.isArray(s.layout?.main) || s.layout.main.length < 1) errs.push('layout.main 必须 ≥1 视图')
       const used = new Set()
       for (const pane of ['main', 'left', 'right']) for (const v of s.layout?.[pane] || []) {
-        // Bluebird 2.0 uses the real host workspace list; it is not a plugin view.
+        if (v.split !== undefined && (pane !== 'main' || !['right', 'down'].includes(v.split))) errs.push(`视图 "${v.type}" 的 split 只能在 main 使用 right/down`)
         if (v.type === 'workspace') continue
+        if (NATIVE_VIEWS.has(v.type)) { used.add(v.type); continue }
         used.add(v.type)
-        if (!PLUGIN_VIEW.test(v.type)) errs.push(`视图 "${v.type}" 不是合法插件视图型(本 space 只用插件视图)`)
+        if (!PLUGIN_VIEW.test(v.type)) errs.push(`视图 "${v.type}" 既不是合法插件视图，也不在原生视图白名单`)
       }
+      if (s.layout.main[0]?.split) errs.push('layout.main 第一项不能声明 split')
       const declared = new Set(s.requires?.views || [])
       for (const u of used) if (!declared.has(u)) errs.push(`requires.views 漏声明 "${u}"`)
       // 交叉核:space 引用的插件视图必须真在 main.js 里注册了(否则装 space 白屏)
       const mainSrc = readFileSync(path.join(ROOT, 'main.js'), 'utf8')
-      for (const u of used) {
+      for (const u of [...used].filter((type) => PLUGIN_VIEW.test(type))) {
         const vid = u.split(':')[2]
         if (!new RegExp(`registerView\\(\\{[^}]*id:\\s*'${vid}'`).test(mainSrc)) errs.push(`插件未注册视图 "${vid}"(space 引用了 ${u})`)
       }
-      errs.length ? bad(`${sd}: ${errs.join(';')}`) : ok(`${sd} space(${used.size} 插件视图,已交叉核注册)`)
+      errs.length ? bad(`${sd}: ${errs.join(';')}`) : ok(`${sd} space(${used.size} 个原生/插件视图,已交叉核注册)`)
     } catch (e) { bad(`${sd}: ${e.message}`) }
   }
 }

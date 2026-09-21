@@ -23,7 +23,7 @@
 
 ```
 你贴链接
-  │  LCL 视图(根 main.js)——「脸」
+  │  原生 Space:收藏侧栏 | 视频(main.js) | Amadeus 文档 | ChatView
   ▼
 桌面插件 bluebird ──POST /agent/runs (execMode:host, agentSlug:bluebird)──▶ 本机 Tangu 引擎
                                                                               │
@@ -34,16 +34,16 @@
   ◀──SSE token/done(总结正文,AI 由 Tangu 直连 Forsion 完成)──────────────────┘
   │
   ▼  ctx.app.writeFile
-Amadeus 笔记(videos/{日期}-{标题}.md)
+Amadeus 笔记(videos/{日期}-{标题}.md) ──openNote(reuseKey)──▶ 同屏文档 + ChatView 自动引用
 ```
 
 | 件 | 包内位置 | 干什么 |
 |---|---|---|
-| 插件(manifest + main.js) | 根 | 工作台视图:输入链接、直播总结、存笔记。驱动 Tangu,自身不碰 Python/网络抓取。 |
+| 插件(manifest + main.js) | 根 | 工作台视频/队列视图:输入链接、播放与任务控制；驱动 Tangu,自身不复制文档或聊天 UI。 |
 | Tangu 文件夹 Agent `bluebird` | `agents/bluebird/` | 引擎侧智能体,视图靠 `agent_config.agentSlug` 选它;串起转录→总结→问答。`full-auto`(host run_bash 无人值守),run_bash 用途死限在「跑转录脚本 + 装 yt-dlp」。引擎启动/重扫时**播种一次**到 `tangu/agents/`(bundles.ts),已存在永不覆盖。 |
 | 技能 + Python | `agents/bluebird/skills/bluebird-video/` | 转录工作流(host 模式 `run_bash` 跑 `scripts/transcribe.py`)+ 10 套总结模板 + 问答/翻译规则,agent 级随播种就位。 |
 | 技能(链接收藏) | `skills/bluebird-link/` | **bundle 级作用域**:引擎 `bundleSkillRoots()` 原地读 `plugins/<id>/skills/`,不播种、所有 agent 都列得到(优先级 内置 < bundle < 用户)。所以「日常对话里丢个链接就入库」这件事必须放这儿——放 `agents/bluebird/skills/` 只有青鸟 agent 看得见。纯提示词,无脚本。 |
-| Space | `spaces/bluebird/` | 工作台一键布局;desktop spaces:list 汇入,随插件启停显隐。 |
+| Space | `spaces/bluebird/` | 原生 Dockview 配方:统一收藏侧栏 + 视频 + Amadeus + ChatView；desktop spaces:list 汇入,随插件启停显隐。 |
 
 ### 为什么转录用 run_bash 而不是 run_python
 `run_python` 跑在 **Docker 沙箱**里:`--network none`(yt-dlp 下载不了)且看不到技能自带的脚本文件。视频抓取必须在 **host 模式**用 `run_bash` 跑本机 Python —— 所以插件驱动 run 时带 `execMode:'host'`。(依据见 Genesis `tangu-agent/src/services/agentLoop.ts`、`tools/builtin/sandboxPython.ts`。)
@@ -68,6 +68,14 @@ sh install.sh prod    # → ~/.forsion
 - **语音识别**:无原生字幕时,脚本只交出 16k 单声道 WAV 的路径,转写由插件调 `window.tangu.transcribeAudioFile(path, {timestamps:true})` 走 Forsion 语音链路完成(设置 → 语音)。插件侧**没有** ASR key 这回事。B 站高清/会员可给 `BLUEBIRD_COOKIE`。
 
 ## 验证(两层)
+
+### Amadeus 时间引用（2.2.1）
+
+- 使用公开的 `ctx.registerEditorExtension((pm, editor) => Plugin[], { priority: 'high' })`。Genesis 第二参数新增 `editor.pagePath()`，是**该编辑器实例**的库相对路径 getter，不读全局活动页；旧宿主第二参数缺席时仅显式锚点可用。
+- `[01:23](#bluebird=<entry-id>&t=83)` 是本地 Markdown 锚点，宿主链接协议白名单不变。ID 与秒数严格校验，旧裸时间码以只读 frontmatter / sidecar 绑定来源，异步结果检查库、工作目录、文档与生命周期，不能污染另一个分屏。
+- 已挂载播放器按条目 ID 寻址；跨条目只切媒体，不自动打开另一篇笔记、不初始化模型会话。存档媒体走 `ctx.app.assetUrl` + 原生媒体元素，在线源沿用平台嵌入接口。特殊锚点依赖青鸟插件；导出仍保留原始总结与来源。
+- `cd ../../Forsion-Genesis/desktop && npm run check:bluebirdtimestamps`：隔离 Electron home/profile，真 Amadeus 点击 → 平台 URL 定位 / 本地 WAV 的 `currentTime`，验证重复点击、跨条目、文档与 Chat 保留、关闭后重开。默认使用 `localhost:5273` 的 dev renderer，可用 `BLUEBIRD_DEV_URL` 覆盖。
+- `node check.mjs` 补充严格引用解析、错误目标隔离、只读旧笔记兼容、代码与已有链接不改写；宿主编辑器回归用 `HARNESS_URL=http://localhost:5273/harness.html npm run e2e:editor`。平台远端实际解码/登录不在离线台架覆盖范围内。
 
 **契约层(自动,已绿):**
 

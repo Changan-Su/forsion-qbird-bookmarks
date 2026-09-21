@@ -2,10 +2,14 @@
   "id": "bluebird",
   "name": { "zh": "青鸟收藏夹", "en": "Bluebird" },
   "icon": "video",
-  "version": "1.1.0",
+  "version": "2.0.2",
   "layout": {
-    "main": [{ "type": "plugin:bluebird:folder" }],
+    "main": [
+      { "type": "plugin:bluebird:folder", "params": { "nativeWorkbench": true } },
+      { "type": "amadeus-editor", "params": { "reuseKey": "bluebird-document" }, "split": "right" },
+      { "type": "chat-panel", "params": { "reuseKey": "bluebird-chat", "autoRefFromMain": true }, "split": "down", "splitFrom": 0 }
+    ],
     "left": [{ "type": "workspace", "params": { "mode": "plugin:bluebird:library-list" } }]
   },
-  "requires": { "views": ["plugin:bluebird:folder"] }
+  "requires": { "views": ["plugin:bluebird:folder", "amadeus-editor", "chat-panel"] }
 }

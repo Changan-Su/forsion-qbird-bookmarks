@@ -1,12 +1,11 @@
 /**
  * 青鸟收藏夹 —— Forsion 桌面插件(裸 setup(ctx) 体,宿主 new Function('ctx', code) 装载)。
  *
- * 两个 LCL 视图(由 space.json 组合成工作台:library 侧栏 + folder 主区):
- *   plugin:bluebird:library —— 收藏夹:文件夹 + 历史 + 搜索(数据存 vault 索引,不依赖外部后端)。
- *   plugin:bluebird:folder  —— 分析/详情:贴链接→驱动 Tangu 抓字幕+出总结;播放器 + 总结/字幕标签 + 问答 + 导出。
+ * 由 space.json 组合成原生工作台:统一收藏侧栏 + 视频主视图 + Amadeus 文档 + ChatView。
+ * plugin:bluebird:folder 在 Space 中只负责链接输入、队列与视频播放；生成的 Markdown 交给
+ * Amadeus，追问交给 ChatView。直接从命令打开时保留旧版一体式详情，兼容旧宿主。
  *
- * 视觉:照搬原版青鸟的 **QBird 设计系统**(青色渐变毛玻璃 + .ui-* 组件,3 主题×2 模式),
- *   作用域全在 .bb-root,默认 qbird、跟随宿主深浅;token 由 THEMES 注入成 --bb-* 变量。
+ * 视觉:复用 Forsion Genesis 原生 token 与交互层级，作用域全在 .bb-root 并跟随宿主主题。
  *
  * 引擎接入(同 desktop/frontend/src/services/agentRunService.ts):POST /agent/runs(execMode:host,
  *   agentSlug:bluebird)+ SSE /events(累积 token.delta、done.content);token 取 window.tangu.getConfig()。
@@ -78,6 +77,8 @@ const MSG = {
     errSubscribe: '订阅事件失败 HTTP {code}', errAnalyze: '分析失败',
     errStreamCut: '与引擎的连接中断,未收到完成事件(可重试)',
     errNoHostExecution: '当前引擎未提供本机执行能力,无法运行视频抓取。仍可收藏链接和阅读已有记录。',
+    readyHostLabel: '本机执行能力(视频抓取与转录)',
+    readyHostUnmet: '当前宿主没有本机执行能力,视频抓取与转录无法运行;收藏链接和阅读已有记录不受影响。',
     errNoAsrBridge: '当前宿主未提供音频文件转写能力。可分析有字幕的视频,或配置宿主的语音识别。',
     errAsrEmpty: '语音识别没有识别出内容(检查「设置 → 语音」里选的模型)',
     errAnalyzeFailed: '分析失败:{msg}',
@@ -96,6 +97,8 @@ const MSG = {
     wcCount: '字数 {n}', wcTarget: ' / 目标 {min}-{max}', wcDetail: ' · 档位:{name}',
     generatedAt: '生成于 {time}',
     noTranscript: '暂无字幕(纯 ASR 或未返回)。', noLyrics: '这首歌没有歌词(纯音乐,或该平台没提供)。', openInBrowser: '在浏览器打开 ↗',
+    nativeDocument: '总结已同步到右侧 Amadeus 文档', nativeDocumentPending: '分析完成后，笔记会自动同步到 Amadeus',
+    nativeChatHint: 'ChatView 会自动引用这篇笔记，可直接继续追问',
     resummarizeTitle: '重新总结(重新分析并排队)', start: '开始',
     needAnalyzeFirst: '先分析一个视频', noAnswer: '(无回答)',
     nothingToSave: '还没有可保存的总结', savedToLibrary: '已存入收藏夹', saveFailed: '保存失败:{msg}',
@@ -157,6 +160,8 @@ const MSG = {
     errSubscribe: 'Could not subscribe to the run events (HTTP {code})', errAnalyze: 'Analysis failed',
     errStreamCut: 'Lost the connection to the engine before it finished — you can retry',
     errNoHostExecution: 'This engine does not provide host execution for video fetching. You can still save links and read existing entries.',
+    readyHostLabel: 'Host execution (video fetching and transcription)',
+    readyHostUnmet: 'Host execution is unavailable here, so video fetching and transcription can\'t run; saving links and reading existing entries still work.',
     errNoAsrBridge: 'This host does not provide audio file transcription. Use a video with captions or configure speech recognition on the host.',
     errAsrEmpty: 'Speech recognition returned nothing (check Settings → Voice)',
     errAnalyzeFailed: 'Analysis failed: {msg}',
@@ -173,6 +178,8 @@ const MSG = {
     wcCount: '{n} characters', wcTarget: ' / target {min}-{max}', wcDetail: ' · Detail: {name}',
     generatedAt: 'Generated {time}',
     noTranscript: 'No transcript here (audio-only recognition, or none returned).', noLyrics: 'No lyrics for this track (instrumental, or the platform provides none).', openInBrowser: 'Open in browser ↗',
+    nativeDocument: 'The summary is synced to the Amadeus document pane', nativeDocumentPending: 'The note will sync to Amadeus when analysis finishes',
+    nativeChatHint: 'ChatView automatically references this note, ready for follow-up questions',
     // 这行渲染进 .bb-label(text-transform:uppercase)、浮层只有 230px:英文整句大写会折行,故只留动词
     resummarizeTitle: 'Re-summarize', start: 'Start',
     needAnalyzeFirst: 'Analyze a video first', noAnswer: '(No answer)',
@@ -534,6 +541,28 @@ async function getCfg() {
   return empty
 }
 const engineError = (cfg) => !cfg.backendUrl ? 'errNoEngine' : !cfg.token ? 'errNeedLogin' : !cfg.hostExecution ? 'errNoHostExecution' : ''
+/** 就绪检查 `host`(manifest onboarding.requires 里的 {kind:'check',id:'host'}):宿主能不能给转录跑 run_bash。
+ *  判据同 getCfg 的 hostExecution;只在桌面宿主不给 executionCapabilities 时多看一眼它自己的配置 ——
+ *  托管引擎(mode:'managed')= 本机,同宿主 tanguProbe.hostExecution 的口径;external 是用户自接的引擎,
+ *  可能在别的机器上,拿不准。**拿不准一律 unknown**:宿主不会拿 unknown 去催用户。
+ *  只读:不 spawn、不探 yt-dlp / ffmpeg(yt-dlp 是引擎内置 Python 的模块、技能会自己 pip 装;ffmpeg 只在无字幕分支用)。
+ *  detail 在调用时才取词表,跟着当时的界面语言走。 */
+async function hostReadiness() {
+  const tg = globalThis.window && window.tangu
+  if (!tg) return 'unknown'
+  const unmet = () => ({ state: 'unmet', detail: t('readyHostUnmet') })
+  // ⚠ 顺序要紧:真实的 Unit / 云端 Web shim **同时**给 unitPage/cloudWeb 和 executionCapabilities:{host:false}。
+  //   先看能力再看形态的话,这两端永远落进 unmet —— 那是本端压根没有、用户也修不了的东西,会挂一个
+  //   永远清不掉的「待引导」徽标(宿主 pluginOnboardingStore 文件头点名的就是这种情形)。形态判断必须在前。
+  if (tg.unitPage || tg.cloudWeb) return 'unknown'
+  const caps = tg.executionCapabilities
+  if (caps && typeof caps === 'object') return caps.host === true ? 'ok' : caps.host === false ? unmet() : 'unknown'
+  try {
+    const c = tg.getConfig ? await tg.getConfig() : null
+    return c && c.mode === 'managed' ? 'ok' : 'unknown'
+  } catch { return 'unknown' }
+}
+ctx.registerReadiness?.({ id: 'host', label: () => t('readyHostLabel'), check: hostReadiness })
 /** 无字幕视频:音频交给 **Forsion 自己的语音链路**(设置 → 语音:本地 SenseVoice 离线 / 自带 key
  *  的 provider / Forsion 云)。插件不自带 ASR 供应商,也就不需要第二个 key。
  *  timestamps:true → 拿分段时间戳,字幕面板与 [MM:SS] 跳播放器才有得用;拿不到就只回文本(不编时间点)。 */
@@ -628,34 +657,41 @@ async function readIndex() {
   return cur || { folders: [], items: [] }
 }
 const writeIndex = (idx) => ctx.app.writeFile(indexPath(), JSON.stringify(idx, null, 2))
-/** 打开青鸟自己写的那篇**裸 `.md`** 笔记 —— 一律 `loadPage`,**不许用 `openFile`**。
+const NATIVE_NOTE_REUSE_KEY = 'bluebird-document'
+/** 打开青鸟自己写的那篇**裸 `.md`** 笔记。新版宿主优先走 `openNote`，这样 Space 里的
+ *  Amadeus 伴随栏能按 reuseKey 原地换文档；`activate:false` 时不会从视频面板抢焦点。
+ *  老宿主一律 `loadPage`,**不许用 `openFile`**。
  *  宿主 `openFile` 只认插件注册过的后缀与内置那几类(`.excalidraw.md`/`.mindmap.md`/`.db`/`.pdf`/图片/`.html`),
  *  裸 `.md` 落 `amadeus.openVaultFile()` = 交给系统默认程序,笔记会在 TextEdit 里打开。
  *  (真源 `desktop/frontend/src/amadeusNav.ts` 的 `openFile`:`if (!matchFileType(path)) openVaultFile(path)`。)
  *  ⚠️反过来同样是事故:`loadPage` 吃到插件文件类型会把它当普通笔记导进 v3 = 毁档 —— 本函数只喂青鸟自己写的裸 .md。
  *  ⚠️`loadPage` 对不存在的路径会凭空造一篇空白笔记,所以只在 `saveEntry` 成功之后调用。 */
-function openNotePath(path) {
+function openNotePath(path, activate = true) {
   if (!path) return
+  if (ctx.app && typeof ctx.app.openNote === 'function') {
+    ctx.app.openNote(path, { reuseKey: NATIVE_NOTE_REUSE_KEY, activate })
+    return
+  }
   if (ctx.app && typeof ctx.app.loadPage === 'function') { ctx.app.loadPage(path); return }
   if (ctx.app && typeof ctx.app.openFile === 'function') ctx.app.openFile(path) // 老宿主没有 loadPage 时的兜底
 }
-/** 正文里独立的 `[MM:SS]` → 可点锚点链接。**这是青鸟升级的核心一步**:此前它是纯文本,
- *  只在青鸟自绘的视图里可点;换成标准 md 链接后,在笔记正文、收件箱、聊天引用条、甚至别人的
- *  Obsidian 里都是活的。
+/** 正文里独立的 `[MM:SS]` → 可点锚点链接。
+ *  新宿主写带 entryId 的青鸟引用,由编辑器扩展跨 View 定位;旧宿主保留可移植链接:
  *  - 已存档本地素材 → `[[文件名#t=95|01:35]]`(宿主 wiki 锚,能就地 seek 顶部播放器)
  *  - 在线源 → `[01:35](分享页?t=95)`(标准 md 链接,任何编辑器都点得开)
  *  ⚠️ 跳过代码块(``` 围栏内的 `[00:12]` 可能是日志/数组下标,不是时间戳),也跳过已经在
  *  链接文本位里的那些(`[[01:35]](…)` 会把语法拧坏)。 */
-function linkifyTimestamps(md, watch, localName) {
+function linkifyTimestamps(md, watch, localName, entryId) {
   const lines = String(md || '').split('\n')
   let fence = false
   return lines.map((line) => {
     if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return line }
     if (fence) return line
-    return line.replace(/(\]\()?\[(\d{1,2}:\d{2}(?::\d{2})?)\](\()?/g, (whole, before, ts, after) => {
-      if (before || after) return whole // 已经是链接的一部分,别碰
-      const sec = parseTs(ts)
+    return line.replace(/(`+)[\s\S]*?\1|!?\[\[[^\n]*?\]\]|!?\[[^\n]*?\]\([^\n]*?\)|\[(\d{1,3}:\d{2}(?::\d{2})?)\]/g, (whole, code, ts, offset) => {
+      if (!ts || line[offset - 1] === '\\' || /^\s*:/.test(line.slice(offset + whole.length))) return whole
+      const sec = citationSeconds(ts)
       if (sec == null) return whole
+      if (validEntryId(entryId)) return `[${ts}](#bluebird=${entryId}&t=${sec})`
       if (localName) return `[[${localName}#t=${sec}|${ts}]]`
       const href = watch ? watch(sec) : ''
       return href ? `[${ts}](${href})` : whole
@@ -684,12 +720,12 @@ async function saveEntry(full) {
   // 顶部播放器块:在线源写裸 URL 一行(宿主的书签卡就地渲成播放器),已存档写 wiki 嵌入。
   // 有了它,"点正文时间戳 → 本笔记内的播放器就地跳过去" 这条最舒服的路径天然成立。
   const player = full.kind === 'link' ? '' : localName ? `![[${localName}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
-  const body = linkifyTimestamps(full.summaryMarkdown, plat.watch, localName)
+  const body = linkifyTimestamps(full.summaryMarkdown, plat.watch, localName, ctx.registerEditorExtension ? id : null)
   await ctx.app.writeFile(notePath, fm + header + player + body)
   const time = full.kind === 'link' ? { savedAt: full.savedAt || new Date().toISOString() } : { generatedAt: full.generatedAt || new Date().toISOString() }
   await ctx.app.writeFile(dataPath(id), JSON.stringify({ ...full, id, notePath, date: today(), ...time }))
   const m = full.meta || {}
-  idx.items = [{ id, title, kind: full.kind, platform: m.platform || '', videoId: m.videoId || '', videoUrl: full.sourceUrl || m.videoUrl || '', folderId: full.folderId || null, date: today(), duration: m.duration || 0, author: m.author || '', thumbnail: m.thumbnail || '' }, ...idx.items.filter((it) => it.id !== id)]
+  idx.items = [{ id, notePath, title, kind: full.kind, platform: m.platform || '', videoId: m.videoId || '', videoUrl: full.sourceUrl || m.videoUrl || '', folderId: full.folderId || null, date: today(), duration: m.duration || 0, author: m.author || '', thumbnail: m.thumbnail || '' }, ...idx.items.filter((it) => it.id !== id)]
   await writeIndex(idx)
   return { id, notePath }
 }
@@ -707,6 +743,137 @@ function httpLink(raw) {
     return /^(http:|https:)$/.test(url.protocol) ? url : null
   } catch { return null }
 }
+
+// Amadeus 时间引用是普通 Markdown 锚点,无需放开宿主的外链协议白名单。
+const validEntryId = (id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id)
+function citationSeconds(raw) {
+  if (typeof raw !== 'string') return null
+  if (/^\d+(?:\.\d+)?$/.test(raw)) { const n = Number(raw); return Number.isFinite(n) && n <= 864000 ? n : null }
+  if (!/^\d{1,3}:\d{2}(?::\d{2})?$/.test(raw)) return null
+  const parts = raw.split(':').map(Number)
+  if (parts.slice(1).some(n => n >= 60)) return null
+  return parts.reduce((n, part) => n * 60 + part, 0)
+}
+function parseTimeReference(href) {
+  if (typeof href !== 'string' || !href.startsWith('#bluebird=')) return null
+  const p = new URLSearchParams(href.slice(1)), id = p.get('bluebird'), at = citationSeconds(p.get('t'))
+  if (p.getAll('bluebird').length !== 1 || p.getAll('t').length !== 1 || !validEntryId(id) || at == null) return null
+  return { entryId: id, at }
+}
+function archivedMediaName(summary) {
+  const name = (/!\[\[([^\]|#]+\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v))\]\]/i.exec(summary || '') || [])[1]
+  return name && !/[\/\\]/.test(name) ? name : null
+}
+const playbackTargets = new Set()
+const playbackScope = () => `${ctx.app.vaultRoot ? ctx.app.vaultRoot() : ''}\n${folderRoot()}`
+function requestTimestamp(ref) {
+  if (!ref || !validEntryId(ref.entryId) || citationSeconds(String(ref.at)) == null) return
+  const targets = [...playbackTargets].filter(p => p.scope === playbackScope())
+  const visible = targets.filter(p => p.visible())
+  const target = visible.find(p => p.entryId() === ref.entryId) || visible.find(p => p.native) || visible[0]
+    || targets.find(p => p.entryId() === ref.entryId) || targets.find(p => p.native) || targets[0]
+  if (target) { target.open(ref); if (!target.visible()) ctx.openView('folder'); return }
+  pendingOpen = { ...ref, playbackOnly: true, scope: playbackScope() }
+  ctx.openView('folder')
+}
+async function entryForNote(path) {
+  if (!path || !/\.md$/i.test(path)) return null
+  const text = await ctx.app.readFile(path)
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text || '')
+  const id = fm && /^bluebird_id:\s*["']?([\w-]+)["']?\s*$/m.exec(fm[1])?.[1]
+  if (validEntryId(id)) { const full = await loadEntry(id); return full ? { ...full, id } : null }
+  // 早期总结没有 frontmatter。只读 sidecar 反查,不批量改写用户笔记。
+  const index = await readIndex()
+  for (const item of index.items) {
+    if (!validEntryId(item.id) || (item.notePath && item.notePath !== path)) continue
+    if (!item.notePath && !path.startsWith(`${folderRoot()}/`) && !path.startsWith(`${LEGACY_ROOT}/`)) continue
+    const full = await loadEntry(item.id)
+    if (full && full.notePath === path) return { ...full, id: item.id }
+  }
+  return null
+}
+function legacyTimeReference(href, entry) {
+  if (!entry || !href) return null
+  try {
+    const url = new URL(href), source = new URL(entry.sourceUrl || entry.meta?.videoUrl)
+    const identity = u => {
+      if (!/^https?:$/.test(u.protocol)) return null
+      if (/^(www\.|m\.)?bilibili\.com$/.test(u.hostname)) return /\/video\/(BV[\w]+)/.exec(u.pathname)?.[1]
+      if (/^(www\.|m\.)?youtube\.com$/.test(u.hostname)) return u.searchParams.get('v')
+      if (u.hostname === 'youtu.be') return u.pathname.slice(1)
+      return null
+    }
+    const raw = url.searchParams.get('t')
+    const at = citationSeconds(raw && /^\d+s$/.test(raw) ? raw.slice(0, -1) : raw)
+    const samePlatform = parsePlatform(url.href).platform === parsePlatform(source.href).platform
+    return at != null && samePlatform && identity(url) && identity(url) === identity(source) ? { entryId: entry.id, at } : null
+  } catch { return null }
+}
+/** 每篇文档独立绑定来源,不读「当前活动页面」:多分屏/引用另一篇笔记也不会跳错视频。 */
+function timestampEditorExtension(pm, editor) {
+  let binding = null, scope = null, path = null, generation = 0, destroyed = false
+  const key = new pm.PluginKey('bluebird-time-reference')
+  function sync(view) {
+    const nextPath = editor?.pagePath?.(), nextScope = playbackScope()
+    if (nextPath === path && nextScope === scope) return
+    path = nextPath; scope = nextScope; binding = null
+    const token = ++generation
+    entryForNote(path).then(entry => {
+      if (destroyed || token !== generation || scope !== playbackScope() || path !== editor?.pagePath?.()) return
+      binding = entry
+      view.dispatch(view.state.tr.setMeta(key, true).setMeta('addToHistory', false))
+    }).catch(() => {})
+  }
+  function reference(event) {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || (event.button != null && event.button !== 0)) return null
+    const target = event.target?.closest?.('[data-bluebird-time], a[href]')
+    if (!target) return null
+    const href = target.getAttribute('href')
+    const explicit = parseTimeReference(href)
+    if (explicit) return explicit
+    if (scope !== playbackScope() || path !== editor?.pagePath?.()) return null
+    if (target.hasAttribute('data-bluebird-time') && binding) return { entryId: binding.id, at: Number(target.getAttribute('data-bluebird-time')) }
+    return legacyTimeReference(href, binding)
+  }
+  function activate(view, event) {
+    const ref = reference(event)
+    if (!ref) return false
+    event.preventDefault(); requestTimestamp(ref); return true
+  }
+  return [new pm.Plugin({
+    key,
+    props: {
+      decorations(state) {
+        if (!binding || scope !== playbackScope() || path !== editor?.pagePath?.()) return null
+        const marks = []
+        state.doc.descendants((node, pos) => {
+          if (node.type.spec.code) return false
+          if (!node.isTextblock) return
+          let text = ''
+          node.forEach(child => { text += child.isText && !child.marks.some(m => m.type.name === 'link' || m.type.spec.code) ? child.text : ' '.repeat(child.nodeSize) })
+          for (const hit of text.matchAll(/\[(\d{1,3}:\d{2}(?::\d{2})?)\]/g)) {
+            const at = citationSeconds(hit[1]), before = text[hit.index - 1], after = text.slice(hit.index + hit[0].length)
+            if (at == null || before === '[' || before === '\\' || /^[\](]|^\s*:/.test(after)) continue
+            marks.push(pm.Decoration.inline(pos + 1 + hit.index, pos + 1 + hit.index + hit[0].length, {
+              'data-bluebird-time': String(at), role: 'link', tabindex: '0',
+              title: L() === 'en' ? `Play at ${hit[1]}` : `跳转到 ${hit[1]}`,
+              style: 'color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:3px',
+            }))
+          }
+          return false
+        })
+        return pm.DecorationSet.create(state.doc, marks)
+      },
+      handleDOMEvents: {
+        mousedown(view, event) { if (!reference(event)) return false; event.preventDefault(); return true },
+        click: activate,
+        keydown(view, event) { return ['Enter', ' '].includes(event.key) ? activate(view, event) : false },
+      },
+    },
+    view(view) { sync(view); return { update: sync, destroy() { destroyed = true; generation++ } } },
+  })]
+}
+ctx.registerEditorExtension?.(timestampEditorExtension, { priority: 'high' })
 /** Bookmark layout has no player, transcript, or AI controls without fetched content. */
 function bookmarkDetailMarkup() {
   return `
@@ -744,7 +911,16 @@ async function saveLink(raw) {
 }
 /** 眼见为实:打开插件就把工作文件夹落进库(写空索引),不必等第一次保存才出现在文件树。 */
 async function ensureWorkFolder() {
-  try { if (!(await readIndexAt(folderRoot()))) await writeIndex({ folders: [], items: [] }) } catch { /* ignore */ }
+  // 冷启动时主进程尚未激活库,readFile 会暂时返回 null。不能把它当成「不存在」:
+  // 等 writeFile 到达时库可能已经恢复,空索引会覆盖用户的收藏。切库/改工作夹期间同样不写。
+  const root = ctx.app.vaultRoot && ctx.app.vaultRoot()
+  if (!root) return // 老宿主没有库就绪信号时也不预建;首次保存会自然建立目录。
+  const folder = folderRoot()
+  try {
+    const existing = await ctx.app.readFile(`${folder}/.bluebird-index.json`)
+    if (existing !== null || ctx.app.vaultRoot() !== root || folderRoot() !== folder) return
+    await ctx.app.writeFile(`${folder}/.bluebird-index.json`, JSON.stringify({ folders: [], items: [] }, null, 2))
+  } catch { /* ignore:只做建夹,读取失败不能覆盖已有数据 */ }
 }
 
 // ── 跨视图小总线(library 点条目 → folder 视图打开;队列变更广播) ──
@@ -957,8 +1133,7 @@ function syncTheme(root) {
 const STYLE = `
 .bb-root{height:100%;min-height:0;display:flex;flex-direction:column;color:inherit;background:var(--bb-bg);font-size:13px;line-height:1.5}
 .bb-root *{box-sizing:border-box}
-.bb-root ::-webkit-scrollbar{width:6px;height:6px}.bb-root ::-webkit-scrollbar-thumb{background:var(--bb-border);border-radius:3px}
-.bb-panel{border-radius:16px;background:var(--bb-surf);border:1px solid var(--bb-border);box-shadow:var(--bb-shadow);backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%)}
+.bb-panel{border-radius:14px;background:var(--bb-surf);border:1px solid var(--bb-border);box-shadow:var(--bb-shadow)}
 .bb-input{width:100%;padding:9px 12px;font:inherit;color:var(--bb-text);background:var(--bb-input);border:1.5px solid var(--bb-border);border-radius:12px;outline:none;transition:border-color .2s,box-shadow .2s}
 .bb-input::placeholder{color:var(--bb-text-subtle)}
 .bb-input:focus{border-color:var(--bb-primary);box-shadow:0 0 0 3px var(--bb-glow)}
@@ -990,7 +1165,7 @@ const STYLE = `
 .bb-ts:hover{filter:brightness(1.1)}
 .bb-ts::before{content:"▸";font-size:.8em}
 /* library */
-.bb-lib{display:flex;flex-direction:column;height:100%;background:var(--bb-sidebar);backdrop-filter:blur(12px)}
+.bb-lib{display:flex;flex-direction:column;height:100%;background:var(--bb-sidebar)}
 .bb-lib-hd{padding:12px;border-bottom:1px solid var(--bb-border-sub)}
 .bb-lib-body{flex:1;overflow:auto;padding:8px 10px}
 .bb-sec{margin:10px 2px 4px;display:flex;align-items:center;justify-content:space-between}
@@ -1004,7 +1179,7 @@ const STYLE = `
 .bb-empty{padding:24px 8px;text-align:center;color:var(--bb-text-subtle);font-size:12px}
 /* detail */
 .bb-app{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bb-bg)}
-.bb-hdr{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bb-border-sub);background:var(--bb-header);backdrop-filter:blur(12px)}
+.bb-hdr{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bb-border-sub);background:var(--bb-header)}
 .bb-body{flex:1;min-height:0;overflow:auto;padding:14px}
 .bb-hero{max-width:640px;margin:6vh auto 0;text-align:center}
 .bb-hero h1{font-size:26px;font-weight:700;margin:0 0 6px;color:var(--bb-primary)}
@@ -1016,6 +1191,17 @@ const STYLE = `
 .bb-media{border-radius:14px;overflow:hidden;background:#000;aspect-ratio:16/9;position:relative}
 .bb-media iframe{width:100%;height:100%;border:0;display:block}
 .bb-ph{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--bb-text-subtle);gap:8px;background:var(--bb-surf-sub)}
+/* Space 原生三分栏中的视频面板:自身不滚动，文档滚动完全交给隔壁 Amadeus。 */
+.bb-native .bb-hdr{align-items:flex-start;flex-wrap:wrap;padding:10px 12px}
+.bb-native-title{flex:1;min-width:160px;padding-top:2px}
+.bb-native-actions{display:flex;gap:4px;align-items:center;margin-left:auto}
+.bb-native .bb-body{display:flex;flex-direction:column;gap:12px;overflow:hidden;padding:12px}
+.bb-native-stage{min-height:0;display:flex;flex:1;flex-direction:column;justify-content:center;gap:12px}
+.bb-native .bb-media{width:100%;max-height:min(58vh,540px);flex:0 1 auto}
+.bb-native-note{padding:12px 13px;background:var(--bb-surf);border:1px solid var(--bb-border-sub);border-radius:12px}
+.bb-native-note strong{display:block;margin-bottom:3px;font-size:12.5px;font-weight:600;color:var(--bb-text)}
+.bb-native-note span{display:block;color:var(--bb-text-muted);font-size:11.5px}
+@media(max-width:520px){.bb-native-actions{width:100%;justify-content:flex-end}.bb-native .bb-media{max-height:42vh}}
 .bb-tabs{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--bb-surf-sub);margin-bottom:10px}
 .bb-tab{flex:1;padding:7px;text-align:center;border-radius:9px;cursor:pointer;font-size:12.5px;color:var(--bb-text-sec)}
 .bb-tab.on{background:var(--bb-tint);color:var(--bb-primary);font-weight:500}
@@ -1146,22 +1332,31 @@ function restoreStage(root, snap) {
 }
 
 // ══ 分析 / 详情视图 ═════════════════════════════════════════════════════════
-function mountAnalyze(el) {
+function mountAnalyze(el, viewCtx) {
   el.innerHTML = ''
   const style = document.createElement('style'); style.textContent = STYLE; el.appendChild(style)
   const root = document.createElement('div'); root.className = 'bb-root'; el.appendChild(root)
   const off = themeObserver(root)
+  // 只在新版 Bluebird Space 的原生工作台中收窄职责。直接命令打开、Mini/Floating、旧宿主继续用
+  // 一体式详情，避免升级后丢掉旧入口的总结/字幕/问答能力。
+  let initialParams = {}
+  try { initialParams = viewCtx && viewCtx.getParams ? viewCtx.getParams() : {} } catch { /* disposed/old host */ }
+  const nativeWorkbench = !!(initialParams.nativeWorkbench && ctx.app && typeof ctx.app.openNote === 'function')
 
   // 视图态:home | run(队列项:直播与结果同一张脸)| entry(已存收藏)。
   // 分析本体在模块级队列 —— 切走/关掉视图照跑,回来还在。
   let cur = { kind: 'home', id: null, live: false }
   let view = null // { title, summary, data, sourceUrl, plat, sessionId, entryId, notePath, detail, generatedAt, runId }
   let qaController = null, seekHandler = null
+  let openGeneration = 0, disposed = false
+  let mediaScope = playbackScope()
   let homeCheck = null // 首页链接提示行的重算入口(切语言回填链接后要重跑一次)
   const say2 = say
 
   // ── 首页:输入面板 + 分析队列面板(照原版 LinkInputPanel + AnalysisQueueList 同屏) ──
   function renderHome() {
+    openGeneration++
+    seekHandler = null
     cur = { kind: 'home', id: null, live: false }
     // option 的 **value 恒为中文 canonical**(进提示词/落盘),只有显示名跟着语言换
     const tplOpts = TEMPLATES.map((v) => `<option value="${v}"${v === getSetting('defaultTemplate', '通用') ? ' selected' : ''}>${tplLabel(v)}</option>`).join('')
@@ -1298,8 +1493,91 @@ function mountAnalyze(el) {
     }
   }
 
+  function renderMedia(media, meta) {
+    const localName = archivedMediaName(view.summary)
+    if (localName) {
+      const player = document.createElement(/\.(mp4|webm|mov|m4v)$/i.test(localName) ? 'video' : 'audio')
+      player.controls = true; player.preload = 'metadata'; player.src = archivedAssetUrl(localName)
+      player.style.cssText = 'width:100%;height:100%;object-fit:contain'
+      let pendingSeek = null
+      const applySeek = () => {
+        if (pendingSeek == null || !player.readyState) return
+        player.currentTime = Number.isFinite(player.duration) ? Math.min(pendingSeek, player.duration) : pendingSeek
+        pendingSeek = null
+        player.play().catch(() => {})
+      }
+      seekHandler = sec => { pendingSeek = sec; applySeek() }
+      player.addEventListener('loadedmetadata', applySeek)
+      player.addEventListener('error', () => say2(L() === 'en' ? 'Archived media is unavailable. Check the file in the library assets folder.' : '存档媒体不可用，请检查收藏夹 assets 文件夹中的原始文件。', { level: 'warning' }))
+      media.replaceChildren(player)
+      return
+    }
+    const seek = (sec) => {
+      if (view.plat.embed) { media.innerHTML = ''; const f = document.createElement('iframe'); f.src = view.plat.embed(sec); f.allow = 'autoplay; fullscreen'; media.appendChild(f) }
+      else say2(L() === 'en' ? 'This source cannot seek in-app. Archive the original media to enable timestamp playback.' : '此平台暂不支持应用内定位；存档原始媒体后即可点击时间引用跳转。', { level: 'warning' })
+    }
+    seekHandler = seek
+    if (view.plat.embed) { const f = document.createElement('iframe'); f.src = view.plat.embed(0); f.allow = 'autoplay; fullscreen'; media.appendChild(f); return }
+    media.innerHTML = ''
+    const thumb = safeHref(meta.thumbnail || '')
+    const hasThumb = /^https:/i.test(thumb)
+    if (hasThumb) { const img = document.createElement('img'); img.className = 'bb-thumb'; img.src = thumb; img.addEventListener('error', () => img.remove()); media.appendChild(img) }
+    const ph = document.createElement('div'); ph.className = 'bb-ph' + (hasThumb ? ' ov' : '')
+    const icon = document.createElement('div'); icon.style.fontSize = '28px'; icon.textContent = '▶'
+    const lab = document.createElement('div'); lab.textContent = view.plat.platform ? platLabel(view.plat.platform) : t('linkLabel')
+    ph.appendChild(icon); ph.appendChild(lab)
+    if (view.sourceUrl) { const a = document.createElement('a'); a.href = safeHref(view.sourceUrl); a.target = '_blank'; a.rel = 'noopener'; a.textContent = t('openInBrowser'); a.style.fontSize = '12px'; if (!hasThumb) a.style.color = 'var(--bb-primary)'; ph.appendChild(a) }
+    media.appendChild(ph)
+  }
+
+  /** 新版 Space 中，插件 pane 只保留媒体和任务控制。文档与问答分别由 Amadeus / ChatView
+   *  原生 pane 承担，因此这里没有第二层滚动容器，也不复制 Markdown/聊天 UI。 */
+  function renderNativeDetail(loading, errText) {
+    const meta = (view.data && view.data.meta) || {}
+    const title = meta.title || view.title || deriveTitle(view.summary) || (view.kind === 'link' ? t('linkLabel') : t('platVideo'))
+    const metaLine = [view.plat.platform ? platLabel(view.plat.platform) : t('linkLabel'), meta.author, meta.duration ? fmtTime(meta.duration) : ''].filter(Boolean).join(' · ')
+    root.innerHTML = `
+<div class="bb-app bb-native">
+  <div class="bb-hdr">
+    <button class="bb-btn ghost sm" data-back title="${t('back')}">←</button>
+    <div class="bb-native-title"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-title></div><div class="bb-muted" style="font-size:11px" data-metaline></div></div>
+    <div class="bb-native-actions">
+      ${view.kind === 'link' ? '' : `<button class="bb-btn ghost sm" data-restart ${loading ? 'disabled' : ''}>${t('resummarize')}</button>`}
+      <button class="bb-btn ghost sm" data-export ${loading ? 'disabled' : ''}>${t('exportBtn')}</button>
+      <button class="bb-btn primary sm" data-save ${loading ? 'disabled' : ''}>${view.entryId ? t('openNote') : t('saveToLibrary')}</button>
+    </div>
+  </div>
+  <div class="bb-body">
+    <div class="bb-prog" data-prog style="display:none">
+      <div class="bb-prog-head"><span data-status></span><span data-pct></span></div>
+      <div class="bb-prog-track"><div class="bb-prog-fill" data-bar></div></div>
+      <div class="bb-steps" data-steps>${STEPS.map((s) => `<span class="bb-step">${t(s[0])}</span>`).join('')}</div>
+    </div>
+    <div class="bb-native-stage">
+      <div class="bb-media" data-media></div>
+      <div class="bb-native-note">
+        <strong data-native-note></strong>
+        <span>${t('nativeChatHint')}</span>
+      </div>
+    </div>
+  </div>
+</div>`
+    const $ = (s) => root.querySelector(s)
+    $('[data-title]').textContent = title
+    $('[data-metaline]').textContent = metaLine
+    $('[data-native-note]').textContent = view.notePath ? t('nativeDocument') : t('nativeDocumentPending')
+    $('[data-back]').addEventListener('click', renderHome)
+    const restart = $('[data-restart]'); if (restart) restart.addEventListener('click', (e) => { if (view.sourceUrl) resummarize(e.currentTarget) })
+    $('[data-save]').addEventListener('click', doSave)
+    $('[data-export]').addEventListener('click', (e) => exportMenu(e.currentTarget))
+    renderMedia($('[data-media]'), meta)
+    if (errText) { const box = $('[data-prog]'); box.style.display = ''; box.classList.add('err'); $('[data-status]').textContent = t('failedPrefix', { msg: errText }) }
+    if (view.notePath && !view.playbackOnly) openNotePath(view.notePath, false)
+  }
+
   // ── 详情(直播 / 结果 / 收藏共用一张脸) ──
   function renderDetail(loading, errText) {
+    if (nativeWorkbench) { renderNativeDetail(loading, errText); return }
     if (view.kind === 'link') { renderBookmarkDetail(); return }
     const meta = (view.data && view.data.meta) || {}
     const title = meta.title || view.title || deriveTitle(view.summary) || t('platVideo')
@@ -1353,22 +1631,7 @@ function mountAnalyze(el) {
     $('[data-save]').addEventListener('click', doSave)
     $('[data-export]').addEventListener('click', (e) => exportMenu(e.currentTarget))
     // 播放器 / 封面(不能内嵌的平台给缩略图,压暗色遮罩,与主题无关)
-    const media = $('[data-media]')
-    const seek = (sec) => { if (view.plat.embed) { media.innerHTML = ''; const f = document.createElement('iframe'); f.src = view.plat.embed(sec); f.allow = 'autoplay; fullscreen'; media.appendChild(f) } }
-    seekHandler = seek
-    if (view.plat.embed) { const f = document.createElement('iframe'); f.src = view.plat.embed(0); f.allow = 'autoplay; fullscreen'; media.appendChild(f) }
-    else {
-      media.innerHTML = ''
-      const thumb = safeHref(meta.thumbnail || '')
-      const hasThumb = /^https:/i.test(thumb)
-      if (hasThumb) { const img = document.createElement('img'); img.className = 'bb-thumb'; img.src = thumb; img.addEventListener('error', () => img.remove()); media.appendChild(img) }
-      const ph = document.createElement('div'); ph.className = 'bb-ph' + (hasThumb ? ' ov' : '')
-      const icon = document.createElement('div'); icon.style.fontSize = '28px'; icon.textContent = '▶'
-      const lab = document.createElement('div'); lab.textContent = platLabel(view.plat.platform)
-      ph.appendChild(icon); ph.appendChild(lab)
-      if (view.sourceUrl) { const a = document.createElement('a'); a.href = safeHref(view.sourceUrl); a.target = '_blank'; a.rel = 'noopener'; a.textContent = t('openInBrowser'); a.style.fontSize = '12px'; if (!hasThumb) a.style.color = 'var(--bb-primary)'; ph.appendChild(a) }
-      media.appendChild(ph)
-    }
+    renderMedia($('[data-media]'), meta)
     // 标签切换 + 提示行(照原版 RightPanelTabs 的 hint)
     const outEl = $('[data-summary]'), trEl = $('[data-transcript]'), hintEl = $('[data-hint]')
     const music = isMusic(view.plat.platform)
@@ -1487,6 +1750,8 @@ function mountAnalyze(el) {
     if (view.runId) { const it = qFind(view.runId); if (it) { it.entryId = r.id; it.notePath = r.notePath } }
     bus.emit({ type: 'saved' })
     const b = root.querySelector('[data-save]'); if (b) b.textContent = t('openNote')
+    const noteState = root.querySelector('[data-native-note]'); if (noteState) noteState.textContent = t('nativeDocument')
+    if (nativeWorkbench) openNotePath(r.notePath, false)
   }
   async function doSave() {
     if (view.entryId && view.notePath) { openNotePath(view.notePath); return } // 已保存 → 在 Amadeus 里打开笔记
@@ -1513,8 +1778,13 @@ function mountAnalyze(el) {
     showMenu(box)
   }
 
-  async function openSaved(id) {
+  async function openSaved(id, options = {}) {
+    const generation = ++openGeneration
+    const requestedScope = playbackScope()
+    if (options.playbackOnly && mediaScope === requestedScope && cur.kind === 'entry' && cur.id === id && seekHandler) { seekHandler(options.at); return }
     const full = await loadEntry(id)
+    if (disposed || generation !== openGeneration || requestedScope !== playbackScope()) return
+    mediaScope = requestedScope
     if (!full) { say2(t('entryMissing'), { level: 'error' }); renderHome(); return }
     const sourceUrl = full.sourceUrl || (full.meta && full.meta.videoUrl) || ''
     cur = { kind: 'entry', id, live: false }
@@ -1523,15 +1793,20 @@ function mountAnalyze(el) {
       data: { meta: full.meta || {}, segments: full.segments || [], chapters: full.chapters || [], tags: full.tags || [] },
       sourceUrl, plat: parsePlatform(sourceUrl), sessionId: uuid(), entryId: id, notePath: full.notePath || null,
       detail: full.detail || '', generatedAt: full.generatedAt || null, savedAt: full.savedAt || null, runId: null,
+      playbackOnly: !!options.playbackOnly,
     }
     renderDetail(false)
+    if (options.playbackOnly) { if (seekHandler) seekHandler(options.at); return }
     // 给新会话垫一句字幕上下文,之后追问 Agent 就记得了
     // ⚠️ 这条也要带 respondIn():否则英文界面下模型先回一句中文「好的记住了」,这轮中文 assistant 进了会话历史,会把后续问答带回中文
     if (view.kind !== 'link' && view.data.segments.length) { const cfg = await getCfg(); if (!engineError(cfg)) runAgent(cfg, view.sessionId, `以下是视频《${(full.meta && full.meta.title) || ''}》的字幕,后续我会基于它提问,先记住不必回复长篇:\n${view.data.segments.slice(0, 400).map((s) => `[${fmtTime(s.start)}] ${s.text}`).join('\n')}${respondIn()}`, null).catch(() => {}) }
   }
 
   // ── 总线消费:library 打开请求 / 队列变更 / 直播 token ──
-  const consume = (e) => { if (!e) return; if (e.fresh) renderHome(); else if (e.entryId) openSaved(e.entryId) }
+  const consume = (e) => { if (!e || (e.scope && e.scope !== playbackScope())) return; if (e.fresh) renderHome(); else if (e.entryId) openSaved(e.entryId, e) }
+  const playbackTarget = { get scope() { return playbackScope() }, native: nativeWorkbench, entryId: () => mediaScope === playbackScope() && cur.kind === 'entry' ? cur.id : null,
+    visible: () => root.isConnected && root.getClientRects().length > 0, open: ref => openSaved(ref.entryId, { ...ref, playbackOnly: true }) }
+  playbackTargets.add(playbackTarget)
   const offBus = bus.on((e) => {
     if (e.type === 'open') { consume(e); return }
     if (e.type === 'queue') {
@@ -1545,7 +1820,10 @@ function mountAnalyze(el) {
     }
     if (e.type === 'run-delta' && cur.kind === 'run' && cur.live && e.id === cur.id) {
       const it = qFind(cur.id); const outEl = root.querySelector('[data-summary]')
-      if (it && outEl) { outEl.textContent = it.summary; view.summary = it.summary }
+      if (it) {
+        view.summary = it.summary
+        if (outEl) outEl.textContent = it.summary
+      }
     }
   })
   // 秒表:活动 run 的耗时逐秒走(首页队列行 + 直播页);无活动任务时空转,开销可忽略
@@ -1570,7 +1848,7 @@ function mountAnalyze(el) {
   ensureWorkFolder() // folder 视图可单独打开(状态栏/命令),不能只靠 library 建夹
   if (pendingOpen) { const p = pendingOpen; pendingOpen = null; consume(p) } else renderHome()
 
-  return () => { off(); offBus(); if (offLocale) offLocale(); clearInterval(tick); if (qaController) qaController.abort() } // 队列不随视图死:分析继续、自动落盘
+  return () => { disposed = true; openGeneration++; playbackTargets.delete(playbackTarget); off(); offBus(); if (offLocale) offLocale(); clearInterval(tick); if (qaController) qaController.abort() } // 队列不随视图死:分析继续、自动落盘
 }
 
 // ── 注册 ──
@@ -1674,6 +1952,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
   Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 

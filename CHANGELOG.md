@@ -1,5 +1,24 @@
 # 更新日志
 
+## 2.2.1 (2026-09-20)
+
+- Amadeus 中的时间引用现在可以定位青鸟视频面板。新保存的总结自动生成 `[01:23](#bluebird=条目ID&t=83)`，把视频与时间绑定在一起；跨条目跳转不会替换正在阅读的文档和 Chat 引用。
+- 兼容已有笔记中的 `[MM:SS]` / `[H:MM:SS]` 以及对应视频的旧在线时间链接，无需重新总结，也不批量改写笔记。
+- 已存档媒体优先使用本地播放器，重复点击时间点无需重载媒体；在线视频仍受平台播放器限制。不支持内嵌的平台会提示先存档原始媒体。
+- **English:** Amadeus timestamp citations now target the correct Bluebird player without replacing the source document or chat reference. New notes use entry-bound Markdown anchors; existing plain timecodes and matching online timestamp links remain clickable without rewriting notes. Archived media seeks locally; online playback remains subject to platform support.
+- 新版宿主的插件引导会实测「本机执行能力」,只在确实缺失时才提示;英文引导补上了「增强自动模式」的说明。**English:** On newer hosts, the setup card checks for host execution and only prompts when it's actually missing; the English intro now also explains Enhanced auto mode.
+
+## 2.2.0 — 2026-09-19
+
+- 青鸟 Space 改成宿主原生三分栏：视频、Amadeus 文档与 ChatView 各自占一个 Dockview 面板，可独立滚动、拖动宽度与恢复布局。滚动长文档时，视频不再跟着滚出屏幕。
+- 分析完成或打开收藏条目时，生成笔记会后台同步到固定的 Amadeus 伴随栏；ChatView 自动引用这篇笔记，可直接继续追问。插件面板不再重复绘制 Markdown 阅读器和聊天框。
+- 直接从命令或旧宿主打开插件时仍保留原有一体式详情，作为向后兼容降级。
+- UI 改用 Genesis 原生颜色、层级与滚动条规则，去掉插件自己的毛玻璃和滚动条覆盖。
+- Space 配方升到 2.0.1，并修复开发版安装后仍恢复旧单栏的问题：插件异步注册完成时会同时废弃旧命名布局与已经恢复到屏幕上的当前布局，再按三分栏配方重建。
+- Space 配方 2.0.2 调整为左上视频、左下 ChatView、右侧 Amadeus 文档通高；侧栏和底部面板由宿主围绕整个主区定位，开合不会再切进某个主区分屏。
+- 修复冷启动时笔记库尚未就绪，预建工作夹可能用空索引覆盖已有收藏的竞态；已有索引（包括损坏数据）不再被初始化覆盖。
+- **English:** Bluebird now uses native Dockview panes: video above ChatView on the left, with a full-height Amadeus document on the right. Each pane scrolls independently; notes sync into Amadeus and ChatView references them automatically. Shell panels stay outside the complete Main region, including when it contains several splits. The legacy all-in-one view remains available outside the new Space.
+
 ## 2.1.0 — 2026-09-09
 
 - 新增「收藏链接」:使用宿主的本地笔记库时,无需 Forsion Server、账号、Tangu 引擎或网络即可收藏链接、打开记录。链接详情显示收藏时间与原始地址,不会伪装成视频总结或已抓取的正文。

@@ -34,11 +34,13 @@ const reg = { views: [], commands: [], settings: [], status: [], listSources: []
 // 语言广播垫片 = 宿主 pluginStore.subscribeLocale 的形状(返回退订函数);emitLocale() 手动播一次。
 const localeSubs = new Set()
 const emitLocale = () => { for (const f of Array.from(localeSubs)) f() }
-const OPENED = { openFile: [], loadPage: [] } // 打开笔记走了哪条路,由下面的断言钉方向
+const OPENED = { openFile: [], loadPage: [], openNote: [] } // 打开笔记走了哪条路,由下面的断言钉方向
 const VAULT = { root: '/Users/x/My Vault' }  // 带空格:存档目录拼出来必须原样带着
+const readiness = [] // ctx.registerReadiness 的注册(宿主 2026-09-21+;旧宿主没有,main.js 必须可选链)
 const ctx = {
   registerView: (v) => reg.views.push(v), registerCommand: (c) => reg.commands.push(c),
   registerListSource: (x) => reg.listSources.push(x), // 统一左栏数据源(宿主 2026-08-25+)
+  registerReadiness: (r) => { readiness.splice(0, readiness.length, ...readiness.filter((o) => o.id !== r.id), r) }, // 宿主同款:同 id 覆盖
   // 宿主同款:设置**同 key 覆盖**(pluginStore.registerSetting 先按 pluginId+key filter 再 append)
   registerSetting: (s) => { reg.settings = reg.settings.filter((o) => o.key !== s.key); reg.settings.push(s) },
   // 宿主同款:状态栏返回 update/dispose 句柄,update 原位改
@@ -86,6 +88,7 @@ const asi = [...lines.keys()].filter((i) => {
   return p >= 0 && /[)\]'"`\w]\s*$/.test(lines[p])
 }).map((i) => i + 1)
 A.equal(asi.length, 0, `以 ( [ 开头的行会被 ASI 粘到上一句:第 ${asi.join(',')} 行`)
+A.ok(!src.includes('::-webkit-scrollbar'), '插件不得覆盖宿主原生滚动条样式')
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
 // 真 LCL 配色(skins.css / tangu.css):强调色 × 兜底字色,对比度必须够读
 for (const [name, ac] of [['cream-dark', '#f8f7f6'], ['cream-light', '#1c1c1c'], ['lovable-dark', '#ece7dd'],
@@ -200,6 +203,41 @@ A.ok(!/player\.bilibili/.test(bili.watch(90)), '⚠️ 播放器地址绝不能�
   // 无 watch()(抖音/小红书/音乐三家)→ 原样保留,绝不造死链接
   A.equal(T.linkifyTimestamps('[01:35] x\n', null, '').trim(), '[01:35] x', '没有分享页地址时原样保留')
 }
+
+// 原生跨 View 时间引用:显式条目绑定、严格解析、旧格式不改盘。
+{
+  A.deepEqual(T.parseTimeReference('#bluebird=entry-1&t=83'), { entryId: 'entry-1', at: 83 })
+  A.deepEqual(T.parseTimeReference('#bluebird=entry-1&t=1:02:30'), { entryId: 'entry-1', at: 3750 })
+  for (const href of ['#bluebird=../other&t=1', '#bluebird=x&t=', '#bluebird=x&t=-1', '#bluebird=x&t=Infinity', '#bluebird=x&t=1&t=2', '#bluebird=x&t=01:99', 'javascript:alert(1)', 'https://example.com/#bluebird=x&t=2']) A.equal(T.parseTimeReference(href), null, href)
+  A.equal(T.linkifyTimestamps('[01:23]', null, '', 'entry-1'), '[01:23](#bluebird=entry-1&t=83)')
+  const untouched = '`[01:23]`\n[[01:23]]\n[01:23](https://example.com)\n[01:23]: /url\n\\[01:23]\n[01:99]\n```js\n[01:23]\n```'
+  A.equal(T.linkifyTimestamps(untouched, null, '', 'entry-1'), untouched, '代码、wiki、已有链接、引用定义、转义和非法时间不改写')
+  A.equal(T.archivedMediaName('![[原片.mp4]]'), '原片.mp4')
+  A.equal(T.archivedMediaName('![[../原片.mp4]]'), null)
+  const entry = { id: 'entry-1', sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }
+  A.deepEqual(T.legacyTimeReference('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=90s', entry), { entryId: 'entry-1', at: 90 })
+  A.equal(T.legacyTimeReference('https://www.youtube.com/watch?v=another&t=90s', entry), null)
+  A.equal(T.legacyTimeReference('https://evil.example/watch?v=dQw4w9WgXcQ&t=90s', entry), null)
+  V.set('videos/.bluebird/time-a.json', JSON.stringify({ id: 'time-a', notePath: 'a.md' }))
+  V.set('videos/.bluebird/time-b.json', JSON.stringify({ id: 'time-b', notePath: 'b.md' }))
+  V.set('a.md', '---\nbluebird_id: time-a\n---\n[00:14]')
+  V.set('b.md', '---\nbluebird_id: time-b\n---\n[00:32]')
+  const beforeWrites = writes.length
+  A.equal((await T.entryForNote('a.md')).id, 'time-a')
+  A.equal((await T.entryForNote('b.md')).id, 'time-b')
+  A.equal(await T.entryForNote('unrelated.md'), null)
+  A.equal(writes.length, beforeWrites, '旧笔记兼容只读,不重写正文')
+  const calls = []
+  const scope = T.playbackScope()
+  const a = { scope, native: true, visible: () => true, entryId: () => 'time-a', open: ref => calls.push(['a', ref.at]) }
+  const b = { scope, native: true, visible: () => true, entryId: () => 'time-b', open: ref => calls.push(['b', ref.at]) }
+  T.playbackTargets.add(a); T.playbackTargets.add(b)
+  T.requestTimestamp({ entryId: 'time-b', at: 32 })
+  T.requestTimestamp({ entryId: '../escape', at: 0 })
+  A.deepEqual(calls, [['b', 32]], '多播放器只定位引用对应的条目')
+  T.playbackTargets.delete(a); T.playbackTargets.delete(b)
+  V.delete('videos/.bluebird/time-a.json'); V.delete('videos/.bluebird/time-b.json'); V.delete('a.md'); V.delete('b.md')
+}
 A.equal(T.isSupported('https://example.com/x'), false)
 
 // 音乐三家:识别得出、都不内嵌(宿主 CSP frame-src 没放行音乐播放器)、进得了输入框
@@ -227,6 +265,12 @@ A.deepEqual(OPENED.loadPage, ['青鸟收藏夹/2026-08-21-起风了.md'], '裸 .
 A.deepEqual(OPENED.openFile, [], '裸 .md 绝不许走 openFile(会甩给系统默认程序,笔记在 TextEdit 里开)')
 T.openNotePath('')
 A.deepEqual(OPENED.loadPage.length, 1, '空路径不该触发打开')
+ctx.app.openNote = (p, options) => OPENED.openNote.push({ p, options })
+T.openNotePath('青鸟收藏夹/2026-09-19-原生分栏.md', false)
+A.deepEqual(OPENED.openNote, [{ p: '青鸟收藏夹/2026-09-19-原生分栏.md', options: { reuseKey: 'bluebird-document', activate: false } }],
+  '新宿主应把笔记后台同步进 Bluebird 的 Amadeus 伴随栏')
+A.equal(OPENED.loadPage.length, 1, '有 openNote 时不应再绕回活动页 loadPage')
+delete ctx.app.openNote
 A.equal(T.isMusic(''), false)
 // 平台名三语键都在(en 侧无中文由下面的词表对齐循环兜)
 for (const p of ['netease', 'qqmusic', 'applemusic']) A.ok(T.platLabel(p) && T.platLabel(p) !== T.platLabel('zzz'), `${p} 应有平台显示名`)
@@ -286,6 +330,25 @@ A.ok(V.has('青鸟收藏夹/.bluebird-index.json'), '新宿主按工作文件夹
 const wN = writes.length
 await T.ensureWorkFolder()
 A.equal(writes.length, wN, '已有索引不重复写(幂等)')
+{
+  const root = VAULT.root, read = ctx.app.readFile
+  VAULT.root = null
+  let reads = 0
+  ctx.app.readFile = async () => { reads++; VAULT.root = root; return null }
+  await T.ensureWorkFolder()
+  A.equal(reads, 0, '库未就绪时不得把静默 null 当成索引缺失')
+  A.equal(writes.length, wN, '冷启期间不能写空索引覆盖收藏')
+  VAULT.root = root
+  // 模拟读索引期间切库
+  ctx.app.readFile = async () => { VAULT.root = '/another-vault'; return null }
+  await T.ensureWorkFolder()
+  A.equal(writes.length, wN, '索引读取期间换库不能向新库写空索引')
+  VAULT.root = root
+  ctx.app.readFile = read
+  V.set('青鸟收藏夹/.bluebird-index.json', '{broken index')
+  await T.ensureWorkFolder()
+  A.equal(V.get('青鸟收藏夹/.bluebird-index.json'), '{broken index', '损坏索引也应保留,不能初始化覆盖')
+}
 
 // ── 2.0.3 回归闸:订阅时必须重读索引(「明明有记录列表却是空」的根因) ──
 // 插件是在宿主**启动期**被激活的,那一刻 vault 根还没恢复(宿主的 vault 引导是懒的),
@@ -531,6 +594,67 @@ A.equal(T.t('queueTitle'), '分析队列')
   VAULT.root = 'C:\\Users\\A\\Vault'
   A.equal(T.mediaSaveDir(), 'C:\\Users\\A\\Vault/' + T.folderRoot() + '/assets')
   VAULT.root = '/Users/x/My Vault'
+}
+
+// ── 就绪检查 host:manifest onboarding.requires 的闸。只读 window.tangu,拿不准一律 unknown(宿主不拿 unknown 催用户) ──
+{
+  const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'))
+  const ob = manifest.onboarding
+  const checkIds = (ob.requires || []).filter((r) => r.kind === 'check').map((r) => r.id)
+  A.deepEqual(checkIds, ['host'], 'manifest 应声明 onboarding.requires:[{kind:"check",id:"host"}]')
+  for (const id of checkIds) A.ok(readiness.some((r) => r.id === id), `requires 里的 check "${id}" 必须在 setup 里 registerReadiness,否则宿主那一行恒 unknown`)
+  // 宿主 sanitizeOnboarding 把 intro / 步骤描述截到 500 字:超了静默截断半句
+  for (const s of [ob.intro, ob.en.intro, ...ob.steps.map((x) => x.description), ...ob.en.steps.map((x) => x.description)]) {
+    A.ok(String(s).length <= 500, `onboarding 文案超过宿主 500 字上限会被截断:${String(s).slice(0, 40)}…`)
+  }
+  A.ok(/增强自动模式/.test(ob.intro) && /Enhanced auto mode/.test(ob.en.intro), 'intro 中英都要讲到增强自动模式')
+  const r = readiness.find((x) => x.id === 'host')
+  A.equal(typeof r.label, 'function', 'label 传函数,切语言即时跟上')
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = async () => { requests++; throw new Error('readiness must not hit the network') }
+  const unmetDetail = (v) => (v && typeof v === 'object' && v.state === 'unmet' ? v.detail : null)
+  try {
+    for (const locale of ['zh', 'en']) {
+      ctx.getLocale = () => locale
+      A.equal(r.label(), locale === 'en' ? 'Host execution (video fetching and transcription)' : '本机执行能力(视频抓取与转录)')
+      delete globalThis.window
+      A.equal(await r.check(), 'unknown', '没有 window.tangu → unknown')
+      globalThis.window = { tangu: { executionCapabilities: { host: true } } }
+      A.equal(await r.check(), 'ok')
+      window.tangu.executionCapabilities.host = false
+      A.equal(unmetDetail(await r.check()), T.t('readyHostUnmet'), '明确 host:false → unmet + 当前语言的 detail')
+      A.ok(locale === 'en' ? !/[一-鿿]/.test(T.t('readyHostUnmet')) : /本机执行/.test(T.t('readyHostUnmet')))
+      window.tangu.executionCapabilities = {}
+      A.equal(await r.check(), 'unknown', 'executionCapabilities 里没有布尔 host → unknown')
+      // ⚠ 设备页 / 云端 Web / 手机:本机执行在这些形态下本来就不存在,用户也修不了 —— 必须 unknown。
+      //   回 unmet 会挂一个永远清不掉的「待引导」徽标(宿主 pluginOnboardingStore 文件头点名的就是这种情形)。
+      window.tangu = { unitPage: true }
+      A.equal(await r.check(), 'unknown', '设备页:本端没有这项能力 → unknown,不是 unmet')
+      window.tangu = { cloudWeb: true }
+      A.equal(await r.check(), 'unknown', '云端 Web / 手机:同上')
+      // ⚠ 真实 shim 是**两者都给**的:unitPage/cloudWeb + executionCapabilities:{host:false}。
+      //   只测不带 capabilities 的那半 → 形态判断挪到能力判断之后也照样绿(2026-09-21 Codex 评审实证)。
+      window.tangu = { unitPage: true, executionCapabilities: { host: false } }
+      A.equal(await r.check(), 'unknown', '设备页 + 明确 host:false:仍是「本端没有」,不许催')
+      window.tangu = { cloudWeb: true, executionCapabilities: { host: false } }
+      A.equal(await r.check(), 'unknown', '云端 Web / 手机 + 明确 host:false:同上')
+      // 桌面宿主(Electron 不注 executionCapabilities):托管引擎 = 本机;external / 读不到配置 = 拿不准
+      window.tangu = { getConfig: async () => ({ mode: 'managed', backendUrl: 'http://127.0.0.1:1' }) }
+      A.equal(await r.check(), 'ok')
+      window.tangu = { getConfig: async () => ({ mode: 'external', backendUrl: 'https://remote.example' }) }
+      A.equal(await r.check(), 'unknown', 'external 引擎可能在别的机器上,不许判 ok 也不许催')
+      window.tangu = { getConfig: async () => { throw new Error('ipc down') } }
+      A.equal(await r.check(), 'unknown')
+      window.tangu = {}
+      A.equal(await r.check(), 'unknown')
+    }
+    A.equal(requests, 0, '就绪检查只读宿主能力,不发网络请求')
+  } finally {
+    globalThis.fetch = originalFetch
+    delete globalThis.window
+    delete ctx.getLocale
+  }
 }
 
 // ── 停用即收干净:顶层语言订阅 + 状态栏项(此前 mock 没有 subscribeLocale,那几行退订代码从没被执行过) ──

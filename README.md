@@ -2,7 +2,7 @@
 
 把一条视频链接变成可读、可检索、可入库的知识笔记 —— 直接在 Forsion 工作台里完成。
 
-**2.1.0:** 新增无需 Server 或引擎的本地链接收藏,并适配 Unit / Web 的资源与执行能力。**English:** Added local bookmarks without Server or an engine, plus Unit / Web host capability support. See [CHANGELOG.md](CHANGELOG.md).
+**2.2.1:** Amadeus 时间引用可定位对应视频，兼容旧时间码；工作台保持左上视频、左下 ChatView、右侧文档通高。**English:** Amadeus timestamps seek the corresponding video, including legacy timecodes. Video and ChatView stay on the left, with a full-height document on the right. See [CHANGELOG.md](CHANGELOG.md).
 
 这是 Bluebird Folder 视频分析应用的 Forsion 原生插件:工作台视图与收藏数据使用宿主的 LCL / Amadeus 能力,分析任务使用宿主的 **Tangu** 引擎。转录用开源 `yt-dlp`,无字幕时需要宿主提供音频转写;总结、问答和翻译使用 Tangu 配置的模型。选择云端模型时,相关内容会发送给所选供应商。
 
@@ -20,11 +20,11 @@
 
 | 组件 | 包内位置 | 作用 |
 |---|---|---|
-| 插件 `bluebird` | 根(`manifest.json` + `main.js`) | 工作台视图(输入链接、看总结、存笔记) |
+| 插件 `bluebird` | 根(`manifest.json` + `main.js`) | 视频/队列面板；总结与追问交给宿主原生 Amadeus / ChatView |
 | 「青鸟收藏夹」Agent | `agents/bluebird/` | 引擎侧智能体,视图驱动它跑分析;引擎启动时**播种一次**到 `tangu/agents/`,之后独立存在(升级不覆盖你的改动) |
 | 「青鸟视频分析」技能 | `agents/bluebird/skills/bluebird-video/` | 转录(yt-dlp)+ 总结/问答/翻译工作流(agent 级,随 Agent 播种);另带**音乐剪藏**支线 `scripts/music_meta.py`(网易云 / QQ 音乐 / Apple Music 单曲 → 歌词+热评+封面收藏卡,不下音频不走 ASR) |
 | 「青鸟链接收藏」技能 | `skills/bluebird-link/` | 文章/文档链接 → 抓正文 → 笔记存进 vault `Links/`(**bundle 级,原地读,所有 agent 可见**,所以在任意 Tangu 对话里说「存一下」就能用;视频链接不接,引导去工作台)。设置项「增强自动模式」经 `<vault>/.bluebird/link-mode.json` 镜像给它 —— 设置值在渲染进程的 localStorage,技能在引擎进程,只有 vault 是两边都够得着的地方 |
-| 「青鸟收藏夹」Space | `spaces/bluebird/` | 工作台一键布局,随插件启停显隐 |
+| 「青鸟收藏夹」Space | `spaces/bluebird/` | 收藏侧栏 + 视频 + Amadeus + ChatView 原生分栏,随插件启停显隐 |
 
 ## 转录依赖
 
@@ -34,10 +34,18 @@
 
 ## 用法
 
-1. 命令面板(⌘/Ctrl-K)「青鸟收藏夹:打开」,或状态栏图标 → 打开视图。
+1. 从 Ribbon 打开「青鸟收藏夹」Space，可看到收藏侧栏、视频、Amadeus 与 ChatView 原生分栏；三块主视图可独立滚动和拖动宽度。命令面板(⌘/Ctrl-K)「青鸟收藏夹:打开」仍可单独打开兼容版一体式视图。
 2. 贴链接后可直接点「收藏链接」保存。需要分析时,贴视频链接、选总结模板(默认「通用」)、点「添加到分析队列」。音乐单曲链接(网易云 / QQ 音乐 / Apple Music)也直接贴 —— 自动走音乐剪藏,模板与详细度对它不适用。视图驱动「青鸟收藏夹」Agent:抓字幕 → 出 Markdown 总结,过程实时显示。
-3. 分析完自动存成 Amadeus 笔记(`{工作文件夹}/{日期}-{标题}.md`,连同来源信息),之后可全库检索;按钮变成「打开笔记」直达。
-4. 想追问 / 翻译:继续在视图里问,或在 Tangu 里直接和「青鸟收藏夹」Agent 对话。
+3. 分析完自动存成 Amadeus 笔记(`{工作文件夹}/{日期}-{标题}.md`,连同来源信息),并同步到同屏 Amadeus 文档区；滚动文档不会移动视频。
+4. 想追问 / 翻译:直接在同屏 ChatView 输入，它会自动引用当前青鸟笔记；也可以在 Tangu 里直接和「青鸟收藏夹」Agent 对话。
+
+## 文档里的时间引用
+
+新保存的总结自动把时间码写成 `[01:23](#bluebird=条目ID&t=83)`；无需自己填写 ID。若在另一篇笔记中引用，可复制该 Markdown 链接（条目 ID 也存于原笔记的 `bluebird_id` 属性）。启用青鸟插件时，点击会定位对应视频，不会把当前文档或 Chat 引用切走。
+
+旧笔记里的 `[MM:SS]` / `[H:MM:SS]` 会按该笔记的收藏来源自动识别，无需重新总结或改写文件；此兼容需要新版 Genesis 的编辑器来源接口。普通笔记里的时间文本、代码块、无关链接不受影响。已存档媒体优先本地定位；Bilibili / YouTube 在线定位取决于平台播放器，小红书 / 抖音等需要先存档原始媒体。关闭青鸟插件或在其他编辑器中打开时，特殊锚点不会提供跨面板播放能力。
+
+**English:** New notes automatically save entry-bound links such as `[01:23](#bluebird=entry-id&t=83)`. Copy the Markdown link to cite that video from another note. Legacy timecodes resolve from the source note on current Genesis hosts without rewriting files. Local archives seek in-place; online seeking depends on platform support. Cross-pane playback requires the enabled Bluebird plugin.
 
 ## 设置(插件详情页)
 
@@ -47,9 +55,9 @@
 
 ## 双语(1.5.0 起)
 
-界面跟随宿主的语言设置(设置 → 中文 / English)。**切语言即时生效**:插件订了宿主的语言广播,两个视图原地重画,不用关掉重开,正在跑的分析队列也不受影响。发给模型的指令里会带上输出语言,所以英文界面下拿到的是英文总结与英文问答。
+界面跟随宿主的语言设置(设置 → 中文 / English)。**切语言即时生效**:插件订了宿主的语言广播,自身视图原地重画,不用关掉重开,正在跑的分析队列也不受影响；Amadeus 与 ChatView 由宿主自己的双语系统渲染。发给模型的指令里会带上输出语言,所以英文界面下拿到的是对应语言的总结。
 
-**切语言不会吞掉你正在弄的东西**(1.5.1):重画前先把现场拍下来、重建后原样搬回 —— 首页里刚粘的链接与选好的模板/详细度,详情页里的整段 AI 问答记录和还没发出去的那句提问。收藏夹侧栏的搜索词同理。
+**切语言不会吞掉你正在弄的东西**(1.5.1):重画前先把现场拍下来、重建后原样搬回 —— 首页里刚粘的链接与选好的模板/详细度；兼容版一体式详情里的问答记录和未发送问题也会保留。原生 ChatView 与收藏侧栏各自由宿主保存现场。
 
 **队列里已有的条目也跟着换语言**(1.5.1):队列项存的是词表键而不是渲染好的字符串,所以三分钟前失败的那条、此刻正卡在抓字幕的那条,切语言后一起变。只有引擎回的原始错误(它没有译文)照原样显示。
 

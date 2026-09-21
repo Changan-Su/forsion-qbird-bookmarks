@@ -2,13 +2,19 @@
   "id": "bluebird",
   "name": "青鸟收藏夹",
   "nameEn": "Bluebird",
-  "version": "2.1.0",
+  "version": "2.2.1",
   "apiVersion": 1,
   "description": "收藏链接并整理视频内容。在提供本地 Amadeus 存储的 Forsion Unit 或桌面宿主中,无需 Server、账号或网络即可收藏链接和阅读已有记录。视频分析使用宿主的 Tangu 引擎及包内 Agent / 技能;需要 Python / yt-dlp,无字幕时还需要 ffmpeg 与宿主音频转写。总结和问答使用已配置的模型,云端模型会接收任务所需内容。",
   "descriptionEn": "Save links and organize video content. On a Forsion Unit or Desktop host with local Amadeus storage, saving links and reading existing entries need no Server, account or network. Video analysis uses the host’s Tangu engine and the bundled agent and skills; it needs Python / yt-dlp, plus ffmpeg and host audio transcription for videos without captions. Summaries and questions use the configured model; cloud models receive the content required for their tasks.",
   "main": "main.js",
   "onboarding": {
     "intro": "青鸟收藏夹是一个工作台视图,把视频链接变成可读可检索的笔记。配套的「青鸟收藏夹」Agent 与「青鸟视频分析」技能已内嵌在本捆绑包里,引擎启动时自动就位,无需另装。另带一个「青鸟链接收藏」技能:在**任意** Tangu 对话里丢一条文章/文档链接说「存一下」,就会抓正文、写成笔记存进库里的 Links/。默认会先确认一句;本页设置里打开「增强自动模式」后,单独发一条链接就直接存,不再问。",
+    "requires": [
+      {
+        "kind": "check",
+        "id": "host"
+      }
+    ],
     "steps": [
       {
         "title": "先收藏,随时阅读",
@@ -24,7 +30,7 @@
       }
     ],
     "en": {
-      "intro": "Bluebird is a workbench view that turns a video link into a note you can read and search. The bundled Bluebird agent and its Bluebird Video Analysis skill ship inside this package and are seeded when the engine starts — nothing else to install. A second skill, Bluebird Link Capture, works in **any** Tangu conversation: drop an article or doc link and say \"save this\", and it fetches the page, writes a note and files it under Links/ in your vault.",
+      "intro": "Bluebird is a workbench view that turns video links into readable, searchable notes. The Bluebird agent and Bluebird Video Analysis skill are bundled and ready when the engine starts — nothing else to install. A second skill, Bluebird Link Capture, works in **any** Tangu chat: drop an article or doc link, say \"save this\", and it fetches the page into a note under Links/. It asks first by default; turn on Enhanced auto mode in this page's settings to save a link sent on its own without asking.",
       "steps": [
         {
           "title": "Save now, read later",
