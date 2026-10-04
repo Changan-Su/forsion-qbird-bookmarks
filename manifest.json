@@ -2,7 +2,7 @@
   "id": "bluebird",
   "name": "青鸟收藏夹",
   "nameEn": "Bluebird",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "apiVersion": 1,
   "description": "收藏链接并整理视频内容。在提供本地 Amadeus 存储的 Forsion Unit 或桌面宿主中,无需 Server、账号或网络即可收藏链接和阅读已有记录。视频分析使用宿主的 Tangu 引擎及包内 Agent / 技能;需要 Python / yt-dlp,无字幕时还需要 ffmpeg 与宿主音频转写。总结和问答使用已配置的模型,云端模型会接收任务所需内容。",
   "descriptionEn": "Save links and organize video content. On a Forsion Unit or Desktop host with local Amadeus storage, saving links and reading existing entries need no Server, account or network. Video analysis uses the host’s Tangu engine and the bundled agent and skills; it needs Python / yt-dlp, plus ffmpeg and host audio transcription for videos without captions. Summaries and questions use the configured model; cloud models receive the content required for their tasks.",
