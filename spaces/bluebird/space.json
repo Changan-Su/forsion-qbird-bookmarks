@@ -2,6 +2,7 @@
   "id": "bluebird",
   "name": { "zh": "青鸟收藏夹", "en": "Bluebird" },
   "icon": "video",
+  "iconFile": "icon.png",
   "version": "2.0.2",
   "layout": {
     "main": [
