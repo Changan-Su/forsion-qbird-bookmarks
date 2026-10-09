@@ -1878,6 +1878,7 @@ if (ctx.registerListSource) {
   ctx.registerListSource({
     id: 'library-list',
     title: t('viewLibrary'),
+    intelligent: { description: 'Live Bluebird bookmark library: saved articles, videos and notes. Optional title/author search. Users can open existing entries; this card does not save or analyze links.', viewId: 'folder' },
     search: true,
     items: (f) => {
       const q = ((f && f.query) || '').trim().toLowerCase()
