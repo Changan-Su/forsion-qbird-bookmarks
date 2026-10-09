@@ -79,3 +79,7 @@
 收藏列表通过 `registerListSource.intelligent` 向 Agent 声明 `plugin:bluebird:library-list`。卡片复用现有收藏数据、搜索与打开条目逻辑；不会自动保存或分析链接。需要支持应用卡片的新版宿主，旧宿主忽略这项声明。
 
 **English:** The existing library source opts into Intelligent UI as `plugin:bluebird:library-list`. Cards reuse live bookmarks, title/author search and item navigation. Rendering does not save or analyze links. Older hosts ignore this optional declaration.
+
+打开已保存的视频只读取本地记录；字幕上下文会等到用户明确提问时才交给模型。列表缓存按智库和工作文件夹隔离，丢弃切库前的迟到读取。
+
+**English:** Opening a saved video only reads existing data. Transcript context is sent with the user's explicit question, never as a background priming run. List caches are scoped to vault/work folder and reject late reads from a previous scope.

@@ -368,6 +368,28 @@ A.equal(writes.length, wN, '已有索引不重复写(幂等)')
   off()
 }
 
+// Intelligent cards: stale vault reads must not repopulate a different active vault.
+{
+  const LS = reg.listSources.find((x) => x.id === 'library-list')
+  const originalRead = ctx.app.readFile, originalRoot = VAULT.root
+  const pending = []
+  ctx.app.readFile = () => new Promise(resolve => pending.push(resolve))
+  VAULT.root = '/vault-a'
+  const offA = LS.subscribe(() => {})
+  A.equal(LS.items({}).length, 0, 'old cache hidden immediately on scope change')
+  VAULT.root = '/vault-b'
+  const offB = LS.subscribe(() => {})
+  pending[1](JSON.stringify({ folders: [], items: [{ id: 'b', title: 'B' }] }))
+  await new Promise(r => setTimeout(r, 0))
+  A.equal(LS.items({})[0].key, 'b')
+  pending[0](JSON.stringify({ folders: [], items: [{ id: 'a', title: 'A' }] }))
+  await new Promise(r => setTimeout(r, 0))
+  A.equal(LS.items({})[0].key, 'b', 'late A must not replace current B')
+  VAULT.root = '/vault-c'
+  A.equal(LS.items({}).length, 0, 'changed scope cannot show old rows before resubscribe')
+  offA(); offB(); ctx.app.readFile = originalRead; VAULT.root = originalRoot
+}
+
 // ── 2.0.2 列表源行首图标:平台官方 favicon(iconUrl),取不到才退词表键 ──
 // lidx 是列表源的闭包私有态,外面只能借一条**会 listReload** 的动作把索引灌进去:
 // 删一个不存在的 key = 索引原样重写 + reload,无副作用。

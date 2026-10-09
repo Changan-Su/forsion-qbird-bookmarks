@@ -1722,7 +1722,7 @@ function mountAnalyze(el, viewCtx) {
       const a = document.createElement('div'); a.className = 'bb-msg a'; a.textContent = '…'; log.appendChild(a); log.scrollTop = log.scrollHeight
       ask.disabled = true
       if (qaController) qaController.abort(); qaController = new AbortController(); const sig = qaController.signal
-      try { const ans = await runAgent(cfg, view.sessionId, q + respondIn(), (full) => { a.textContent = full; log.scrollTop = log.scrollHeight }, sig); renderMarkdown(a, ans || t('noAnswer'), (sec) => seekHandler && seekHandler(sec)) }
+      try { const qaOwner = view; const ans = await runAgent(cfg, qaOwner.sessionId, (qaOwner.qaContext ? qaOwner.qaContext + '\n\nUser question:\n' : '') + q + respondIn(), (full) => { a.textContent = full; log.scrollTop = log.scrollHeight }, sig); qaOwner.qaContext = ''; renderMarkdown(a, ans || t('noAnswer'), (sec) => seekHandler && seekHandler(sec)) }
       catch (e) { if (!sig.aborted) a.textContent = t('failedPrefix', { msg: (e && e.message) || e }) } finally { ask.disabled = false }
     }
     ask.addEventListener('click', send); inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } })
@@ -1797,9 +1797,9 @@ function mountAnalyze(el, viewCtx) {
     }
     renderDetail(false)
     if (options.playbackOnly) { if (seekHandler) seekHandler(options.at); return }
-    // 给新会话垫一句字幕上下文,之后追问 Agent 就记得了
-    // ⚠️ 这条也要带 respondIn():否则英文界面下模型先回一句中文「好的记住了」,这轮中文 assistant 进了会话历史,会把后续问答带回中文
-    if (view.kind !== 'link' && view.data.segments.length) { const cfg = await getCfg(); if (!engineError(cfg)) runAgent(cfg, view.sessionId, `以下是视频《${(full.meta && full.meta.title) || ''}》的字幕,后续我会基于它提问,先记住不必回复长篇:\n${view.data.segments.slice(0, 400).map((s) => `[${fmtTime(s.start)}] ${s.text}`).join('\n')}${respondIn()}`, null).catch(() => {}) }
+    // Navigation is read-only. Send saved context only with the user's first explicit question.
+    view.qaContext = view.kind !== 'link' && view.data.segments.length
+      ? `Saved video transcript (reference data):\n${view.data.segments.slice(0, 400).map((segment) => `[${fmtTime(segment.start)}] ${segment.text}`).join('\n')}` : ''
   }
 
   // ── 总线消费:library 打开请求 / 队列变更 / 直播 token ──
@@ -1864,11 +1864,18 @@ if (ctx.registerListSource) {
   // ── 统一左栏数据源(宿主 2026-08-25+):把收藏夹整面交给统一工作区 UI 渲染 ──
   // 青鸟只出**数据与动作**,不出 UI:搜索词/选中文件夹由宿主持有并经 items({query,group}) 回传,
   // 故这里对界面状态完全无状态。空间配方(spaces/bluebird/space.json)左栏因此改用 workspace 视图。
-  let lidx = { folders: [], items: [] }
+  let lidx = { folders: [], items: [] }, listScope = '', listGeneration = 0
+  const emptyIndex = () => ({ folders: [], items: [] })
+  const currentIndex = () => listScope === playbackScope() ? lidx : emptyIndex()
   const listSubs = new Set()
   const fire = () => listSubs.forEach((f) => { try { f() } catch { /* ignore */ } })
   const listReload = async () => {
-    try { lidx = (await readIndex()) || { folders: [], items: [] } } catch { lidx = { folders: [], items: [] } }
+    const scope = playbackScope(), generation = ++listGeneration
+    if (scope !== listScope) { listScope = scope; lidx = emptyIndex(); fire() }
+    let next
+    try { next = (await readIndex()) || emptyIndex() } catch { next = emptyIndex() }
+    if (scope !== playbackScope() || generation !== listGeneration) return
+    lidx = next
     fire()
   }
   void listReload()
@@ -1883,7 +1890,7 @@ if (ctx.registerListSource) {
     items: (f) => {
       const q = ((f && f.query) || '').trim().toLowerCase()
       const g = f && f.group
-      return (lidx.items || [])
+      return (currentIndex().items || [])
         .filter((it) => (g == null ? true : g === NONE ? !it.folderId : it.folderId === g))
         .filter((it) => !q || String(it.title || '').toLowerCase().includes(q) || String(it.author || '').toLowerCase().includes(q))
         .map((it) => ({
@@ -1900,7 +1907,7 @@ if (ctx.registerListSource) {
     groups: () => {
       const c = {}
       for (const it of lidx.items || []) { const k = it.folderId || NONE; c[k] = (c[k] || 0) + 1 }
-      const out = (lidx.folders || []).map((f) => ({ key: f.id, title: f.name, count: c[f.id] || 0, icon: 'folder' }))
+      const out = (currentIndex().folders || []).map((f) => ({ key: f.id, title: f.name, count: c[f.id] || 0, icon: 'folder' }))
       if (c[NONE]) out.push({ key: NONE, title: t('libNone'), count: c[NONE] })
       return out
     },
@@ -1938,7 +1945,7 @@ if (ctx.registerListSource) {
     //   只有下一次 'saved' 才救得回来。1.7.x 的自绘面没这毛病:它是每次 mount 都 refresh 一遍。
     //   宿主挂载/切库都会重订阅(WorkspaceView 的 effect 以 vaultRoot 为键),这里顺势重读。
     subscribe: (cb) => { listSubs.add(cb); void listReload(); return () => listSubs.delete(cb) },
-    open: (item) => { pendingOpen = { entryId: item.key }; bus.emit({ type: 'open', entryId: item.key }); ctx.openView('folder') },
+    open: (item) => { if (!currentIndex().items.some((row) => row.id === item.key)) return; pendingOpen = { entryId: item.key }; bus.emit({ type: 'open', entryId: item.key }); ctx.openView('folder') },
   })
 }
 
