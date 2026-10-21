@@ -29,6 +29,8 @@ import re
 import shutil
 import sys
 import tempfile
+import subprocess
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -164,7 +166,7 @@ def extract_subtitles(info, work_dir, lang_priority, headers=None):
 # provider → Forsion 云),用户在「设置 → 语音」里已经选好了。脚本再自带一个 ASR 供应商 =
 # 第二套配置、第二个 key、第二份账单。故只负责把音频抠成 16k 单声道 WAV 并交出路径。
 
-def download_audio(url, work_dir, headers):
+def download_audio(url, work_dir, headers, info=None):
     """下载 bestaudio 转 **16kHz 单声道 WAV**(需 ffmpeg)。
 
     为什么固定 16k/mono/WAV:本地 SenseVoice 就吃这个采样率,且宿主是自己解析 WAV 头
@@ -177,9 +179,10 @@ def download_audio(url, work_dir, headers):
         "quiet": True,
         "noprogress": True,
         "noplaylist": True,
-        "socket_timeout": 300,
-        "retries": 3,
-        "fragment_retries": 3,
+        "socket_timeout": 45,
+        "retries": 1,
+        "fragment_retries": 1,
+        "extractor_retries": 1,
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         "postprocessor_args": {"extractaudio": ["-ar", "16000", "-ac", "1"]},
         "http_headers": headers,
@@ -187,7 +190,10 @@ def download_audio(url, work_dir, headers):
         "keepvideo": True,
     }
     with YoutubeDL(opts) as ydl:
-        ydl.extract_info(url, download=True)
+        if info:
+            ydl.process_ie_result(dict(info), download=True)
+        else:
+            ydl.extract_info(url, download=True)
     audio = work_dir / "audio.wav"
     if not audio.exists():
         for item in sorted(work_dir.iterdir()):
@@ -264,7 +270,7 @@ def download_images(urls, save_dir, stem, headers):
 # ── 图文帖(小红书笔记这类没有音轨的帖子) ────────────────────────────────────
 
 # yt-dlp 对图文帖常直接抛而不是回一个「没有流」的 info,这两句是它的形态(照搬 xiaohongshu_extractor 的实战判据)
-IMAGE_POST_ERRORS = ("no video formats", "unable to extract")
+IMAGE_POST_ERRORS = ("no video formats",)
 
 
 def is_image_post_error(exc):
@@ -315,16 +321,77 @@ def build_meta(info, fallback_url):
     }
 
 
-def run(url, save_to=None):
-    from yt_dlp import YoutubeDL
-    langs = [s.strip() for s in os.environ.get(
-        "BLUEBIRD_LANGS", "zh-Hans,zh-CN,zh,en,en-US").split(",") if s.strip()]
+class RetrievalError(RuntimeError):
+    def __init__(self, stage, cause):
+        self.stage = stage
+        super().__init__(str(cause))
+
+
+def request_headers(url):
     headers = {"User-Agent": os.environ.get("BLUEBIRD_UA", "").strip() or DEFAULT_UA}
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host == "bilibili.com" or host.endswith(".bilibili.com") or host == "b23.tv":
+        headers["Referer"] = "https://www.bilibili.com/"
+    elif host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com") or host == "xhslink.com":
+        headers["Referer"] = "https://www.xiaohongshu.com/"
     if os.environ.get("BLUEBIRD_COOKIE", "").strip():
         headers["Cookie"] = os.environ["BLUEBIRD_COOKIE"].strip()
+    return headers
+
+
+def diagnostics():
+    try:
+        from yt_dlp.version import __version__
+    except ImportError:
+        __version__ = None
+    ffmpeg = shutil.which("ffmpeg")
+    version = None
+    if ffmpeg:
+        try:
+            version = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True, timeout=5, check=True).stdout.splitlines()[0]
+        except (OSError, subprocess.SubprocessError, IndexError):
+            pass
+    return {"python": sys.executable, "pythonVersion": sys.version.split()[0], "ytDlp": __version__, "ffmpeg": ffmpeg, "ffmpegVersion": version}
+
+
+def local_result(filename):
+    source = Path(filename).expanduser().resolve(strict=True)
+    if not source.is_file() or not shutil.which("ffmpeg"):
+        raise RetrievalError("dependencies", "A local media file and ffmpeg are required")
+    fd, destination = tempfile.mkstemp(prefix="bluebird-local-asr-", suffix=".wav")
+    os.close(fd)
+    try:
+        subprocess.run([shutil.which("ffmpeg"), "-nostdin", "-y", "-i", str(source), "-vn", "-ar", "16000", "-ac", "1", destination],
+                       capture_output=True, text=True, timeout=600, check=True)
+    except Exception as exc:
+        Path(destination).unlink(missing_ok=True)
+        raise RetrievalError("media", "Could not convert the selected local media file") from exc
+    return {"ok": True, "source": "needs_asr", "audio_path": destination,
+            "meta": {"title": source.stem, "videoId": "", "webpageUrl": "", "duration": 0}, "diagnostics": diagnostics()}
+
+
+def failure_result(err):
+    message = str(err)
+    message = re.sub(r"(?i)([?&](?:token|sign|signature|auth|wsSecret|wsTime|deadline|expires)=)[^&\s]+", r"\1[REDACTED]", message)
+    message = re.sub(r"(?i)(cookie|authorization)\s*[:=][^\r\n]+", r"\1=[REDACTED]", message)
+    code = re.search(r"(?:HTTP(?: Error)?\s*|code[=: ]+)(-?\d{3})", message, re.I)
+    blocked = bool(re.search(r"(?:\b412\b|\b567\b|request was banned|forbidden|login|required|sign.?in)", message, re.I))
+    return {"ok": False, "error": {"stage": getattr(err, "stage", "dependencies"), "message": message, "code": code.group(1) if code else "", "blocked": blocked},
+            "diagnostics": diagnostics(), "nextActions": ["Open the source in your browser", "Import local media or subtitles", "Retry after the source is accessible"]}
+
+
+def run(url, save_to=None):
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise RetrievalError("dependencies", "yt-dlp is unavailable in this Python runtime") from exc
+    langs = [s.strip() for s in os.environ.get(
+        "BLUEBIRD_LANGS", "zh-Hans,zh-CN,zh,en,en-US").split(",") if s.strip()]
+    headers = request_headers(url)
     work_dir = Path(tempfile.mkdtemp(prefix="bluebird_"))
     probe_opts = {"quiet": True, "noprogress": True, "noplaylist": True,
                   "http_headers": headers, "skip_download": True,
+                  "socket_timeout": 30, "retries": 1, "extractor_retries": 1,
                   # 图文帖没有流,不加这个 flag yt-dlp 直接抛 `No video formats found` ——
                   # 加上则退成 warning 并照常回 info(缩略图/正文/时长都在)。web 版一直有,原生化时漏了。
                   "ignore_no_formats_error": True}
@@ -334,10 +401,13 @@ def run(url, save_to=None):
                 info = ydl.extract_info(url, download=False)
         except Exception as exc:
             # 图文帖没有视频流,yt-dlp 常在这一步就抛 —— 退成不解析流的元数据抽取
-            if not is_image_post_error(exc):
-                raise
+            host = urllib.parse.urlparse(url).hostname or ""
+            if not is_image_post_error(exc) or not (host.endswith(".xiaohongshu.com") or host in ("xiaohongshu.com", "xhslink.com")):
+                raise RetrievalError("metadata", exc) from exc
             with YoutubeDL(probe_opts) as ydl:
                 info = ydl.extract_info(url, download=False, process=False)
+            if info.get("formats") or info.get("url") or info.get("duration"):
+                raise RetrievalError("metadata", exc) from exc
             return image_post_result(info, url, save_to, headers)
         meta = build_meta(info, url)
         segments, lang = extract_subtitles(info, work_dir, langs, headers)
@@ -347,7 +417,7 @@ def run(url, save_to=None):
 
         # 图文帖:时长 0 且确有图/正文。附加条件是防线 —— 光看 duration==0 会把「元数据缺时长的视频」
         # 误判成图文帖,那样会静默交出一份没有内容的空卡。
-        if int(info.get("duration") or 0) == 0 and (dedupe_thumbnails(info) or info.get("description")):
+        if not (info.get("formats") or info.get("url")) and int(info.get("duration") or 0) == 0 and (dedupe_thumbnails(info) or info.get("description")):
             return image_post_result(info, url, save_to, headers)
         # 有时长却没有任何流 = 地区限制/已删/需登录,不是图文帖。ignore_no_formats_error 让它也回 info
         # 而不是抛,所以这里得自己拦 —— 掉进下面去下音频只会得到一句难懂的 ffmpeg 报错。
@@ -356,12 +426,12 @@ def run(url, save_to=None):
 
         # 无字幕:只把音频备好交出去,转写归 Forsion 的语音链路(见文件头)。
         try:
-            audio = download_audio(url, work_dir, headers)
+            if not shutil.which("ffmpeg"):
+                raise RetrievalError("dependencies", "ffmpeg is required for audio transcription")
+            audio = download_audio(url, work_dir, headers, info)
         except Exception as exc:
             # 上面 duration 闸没拦住的图文帖会在这里现形(帖子报了假的流)
-            if not is_image_post_error(exc):
-                raise
-            return image_post_result(info, url, save_to, headers)
+            raise RetrievalError("media", exc) from exc
         # 存档在搬走 wav 之前做:原始压缩音频还躺在 work_dir 里,finally 会把整个目录删掉
         assets = []
         if save_to:
@@ -446,7 +516,7 @@ def selftest():
     # 有时长但没有流 ≠ 图文帖(ignore_no_formats_error 之后它也会回 info,不能当图文处理)
     assert not (int({"duration": 300, "formats": []}.get("duration") or 0) == 0), "有时长就不该进图文档"
     assert is_image_post_error(Exception("ERROR: No video formats found!"))
-    assert is_image_post_error(Exception("Unable to extract initial state"))
+    assert not is_image_post_error(Exception("Unable to extract initial state"))
     assert not is_image_post_error(Exception("HTTP Error 404: Not Found"))
     print("selftest ok")
 
@@ -472,15 +542,25 @@ def main():
     if args and args[0] == "--selftest":
         selftest()
         return
+    if args and args[0] == "--diagnose":
+        print(json.dumps(diagnostics(), ensure_ascii=False))
+        return
+    if len(args) == 2 and args[0] == "--local-file":
+        print(json.dumps(local_result(args[1]), ensure_ascii=False))
+        return
     url, save_to = parse_args(args)
     if not url or not url.strip():
         raise ValueError('用法: python transcribe.py <video_url> [--save-to "<绝对目录>"]')
-    print(json.dumps(run(url.strip(), save_to), ensure_ascii=False))
+    result = run(url.strip(), save_to)
+    result["diagnostics"] = diagnostics()
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as err:  # noqa: BLE001 — 顶层兜底,错误进 stderr 供 run_bash 判定
-        print(str(err), file=sys.stderr)
+        result = failure_result(err)
+        print(json.dumps(result, ensure_ascii=False))
+        print(json.dumps(result["error"], ensure_ascii=False), file=sys.stderr)
         sys.exit(1)

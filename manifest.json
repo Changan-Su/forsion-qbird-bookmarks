@@ -2,10 +2,10 @@
   "id": "bluebird",
   "name": "青鸟收藏夹",
   "nameEn": "Bluebird",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "apiVersion": 1,
-  "description": "收藏链接并整理视频内容。在提供本地 Amadeus 存储的 Forsion Unit 或桌面宿主中,无需 Server、账号或网络即可收藏链接和阅读已有记录。视频分析使用宿主的 Tangu 引擎及包内 Agent / 技能;需要 Python / yt-dlp,无字幕时还需要 ffmpeg 与宿主音频转写。总结和问答使用已配置的模型,云端模型会接收任务所需内容。",
-  "descriptionEn": "Save links and organize video content. On a Forsion Unit or Desktop host with local Amadeus storage, saving links and reading existing entries need no Server, account or network. Video analysis uses the host’s Tangu engine and the bundled agent and skills; it needs Python / yt-dlp, plus ffmpeg and host audio transcription for videos without captions. Summaries and questions use the configured model; cloud models receive the content required for their tasks.",
+  "description": "收藏链接，按你的要求整理成双语文本或学习资料。支持分析日志导出和旧目录资料检测。仅收藏与阅读已有资料可离线完成；视频获取和 AI 整理依赖宿主的执行、转写及模型能力。",
+  "descriptionEn": "Save links and organize content into bilingual text or study material using your instructions. Export analysis logs and discover previous data folders. Saving links and reading saved content work offline; fetching videos and AI organization require the host’s execution, transcription and model capabilities.",
   "main": "main.js",
   "onboarding": {
     "intro": "青鸟收藏夹是一个工作台视图,把视频链接变成可读可检索的笔记。配套的「青鸟收藏夹」Agent 与「青鸟视频分析」技能已内嵌在本捆绑包里,引擎启动时自动就位,无需另装。另带一个「青鸟链接收藏」技能:在**任意** Tangu 对话里丢一条文章/文档链接说「存一下」,就会抓正文、写成笔记存进库里的 Links/。默认会先确认一句;本页设置里打开「增强自动模式」后,单独发一条链接就直接存,不再问。",
@@ -26,7 +26,7 @@
       },
       {
         "title": "开用",
-        "description": "命令面板「青鸟收藏夹:打开」开视图;贴链接(或整段分享文案)加入分析队列,可连贴多条排队跑,点队列行看直播进度;分析完自动存为 Markdown 笔记,落在插件的「工作文件夹」(默认「青鸟收藏夹」,首次打开即在库里建好,插件设置里可改),点「打开笔记」直达。"
+        "description": "新建收藏时粘贴链接，并填写可选的整理要求。仅收藏会保存链接与要求草稿；收藏并整理会固定本次要求并启动任务。队列和详情均可查看、导出日志，失败或取消也保留已保存的记录。默认资料位置为 Plugins/青鸟收藏夹，可在工作文件夹设置中调整；发现旧资料时先确认使用旧目录。"
       }
     ],
     "en": {
@@ -42,7 +42,7 @@
         },
         {
           "title": "Getting started",
-          "description": "Open the view from the command palette (\"Bluebird: Open\"), then paste a link — or a whole block of share text — to add it to the analysis queue. Queue several at once and click any row to watch it live. Finished analyses are saved as Markdown notes in the plugin work folder, which is created in your vault the first time you open the view and can be renamed in the plugin settings; \"Open note\" jumps straight to it."
+          "description": "Paste a link and optionally describe the result you need. Save only keeps the link and instructions; Save and organize snapshots the instructions and starts a task. View and export saved logs even after failure or cancellation. The default work folder is Plugins/青鸟收藏夹; previous data is detected and reconnected only after confirmation."
         }
       ]
     },

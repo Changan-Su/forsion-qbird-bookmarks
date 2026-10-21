@@ -1,7 +1,7 @@
 ---
 name: 青鸟视频分析
 description: 当用户给出一条视频链接(Bilibili / YouTube / 抖音 / 小红书)或想要总结、问答、翻译某个视频内容时使用;小红书这类**图文帖**(没有音轨)走本技能的「图文剪藏」一节;给出音乐链接(网易云 / QQ 音乐 / Apple Music)想收藏一首歌时,走本技能的「音乐剪藏」一节。先用 yt-dlp 抓原生/自动字幕(无字幕则交由 Forsion 的语音识别转写),再产出结构化 Markdown 总结、基于字幕的问答与字幕翻译。
-version: 1.0.0
+version: 1.1.0
 category: 内容分析
 ---
 
@@ -11,6 +11,16 @@ category: 内容分析
 转录用本技能自带的 Python(`scripts/transcribe.py`,基于开源 yt-dlp),总结/问答/翻译由你(模型)直接完成。
 
 > 设计依据:视频信息密度低、无法全文检索、看完就忘。本技能的目的 = 把视频沉淀成一份**不看原片也能读懂**的笔记。
+
+## Task instructions and retrieval diagnostics (2.3)
+
+- For bilingual or parallel output, every paragraph or learning item needs full Chinese and English text. Translating headings or retaining English keywords alone does not satisfy this.
+- Preserve the user's exact task instructions. Explicit output language, bilingual layout, learning objectives and questions override the default summary template. Combine compatible instructions. Never translate or rewrite a saved instruction draft.
+- Use the script adjacent to this loaded skill file. Do not search other Forsion homes or run a stale copy. Report the actual script path in the tool call.
+- Run `python3 "<skill directory>/scripts/transcribe.py" --diagnose` first. It reports the actual Python, yt-dlp and ffmpeg paths/versions. Install or update yt-dlp only when missing or outdated; do not repeatedly install it after a platform denial.
+- The script returns structured errors with a retrieval stage and actual message. Initial-state parsing failures are not evidence of an image post. HTTP 412 / 567, authentication and region restrictions must remain failures. Stop blind retries; offer opening the source in the browser or importing local media/subtitles. Never invent source content or quietly switch the target.
+- If the caller owns ASR, return its requested machine block including the real audio path, metadata and archived assets. Do not call another speech service. When fetching fails, use the caller's error block and keep the real stage/code.
+- Use only source timestamps. Without timestamps, omit time references. Do not imply that audio was saved as video. Only embed assets actually returned by the script.
 
 ## 转录(host 模式 · 用 run_bash 跑 scripts/transcribe.py)
 

@@ -2,7 +2,15 @@
 
 把一条视频链接变成可读、可检索、可入库的知识笔记 —— 直接在 Forsion 工作台里完成。
 
-**2.2.1:** Amadeus 时间引用可定位对应视频，兼容旧时间码；工作台保持左上视频、左下 ChatView、右侧文档通高。**English:** Amadeus timestamps seek the corresponding video, including legacy timecodes. Video and ChatView stay on the left, with a full-height document on the right. See [CHANGELOG.md](CHANGELOG.md).
+**2.3.0:** 新建收藏时可填写整理要求，常用要求可编辑；仅收藏保留要求，任务固定提交时的原文。原生阅读工作台按需展开，任务日志可在成功、失败或取消后导出。断线恢复会接回原运行，重新整理保留已有笔记。旧目录资料先检测、确认后接回，不自动迁移。
+
+**English:** Add editable instructions to each bookmark. Save-only preserves them; analysis snapshots them. Native reading companions open on demand. Saved logs remain exportable after success, failure or cancellation. Reconnect resumes the original run, new result versions keep existing notes, and previous folders are reconnected only after confirmation. Platform restrictions can still prevent retrieval; local subtitle/media import is available.
+
+Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-run`). `bash install.sh dev` upgrades the existing manifest id, including installations named `item`, with a rollback copy under `backups/plugin-upgrades/`. It does not rewrite seeded agent configuration, memory, modified skills or vault data. Restart the host to load the bundle; the engine's fingerprint-based skill updater preserves user changes. Full focused/reading layout and filesystem-scoped writes require the companion-capable host supplied with this change. Older hosts retain existing bookmark reading/export; new saves require the paired host update.
+
+**升级前可预览：** `python3 upgrade.py prod --dry-run`。安装器按 manifest id 找到实际目录、保留可回退副本，不覆盖已播种 Agent 的用户配置或修改过的技能。完整 A 布局及新收藏保存需要配套宿主更新（`setCompanionsVisible` / `writeFileScoped`）；旧宿主可阅读、导出现有收藏，新保存会明确提示升级，避免切库时写入错误智库。此仓的分支通过检查不代表已发布或已更新安装版。
+
+**English:** This upgrade requires the paired host changes for the A layout and new bookmark writes (`setCompanionsVisible` / `writeFileScoped`). Older hosts can read and export existing bookmarks; new saves explain that the desktop app needs updating. Branch validation does not mean a release or installed-app update.
 
 这是 Bluebird Folder 视频分析应用的 Forsion 原生插件:工作台视图与收藏数据使用宿主的 LCL / Amadeus 能力,分析任务使用宿主的 **Tangu** 引擎。转录用开源 `yt-dlp`,无字幕时需要宿主提供音频转写;总结、问答和翻译使用 Tangu 配置的模型。选择云端模型时,相关内容会发送给所选供应商。
 

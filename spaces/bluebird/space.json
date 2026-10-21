@@ -1,16 +1,35 @@
 {
   "id": "bluebird",
-  "name": { "zh": "青鸟收藏夹", "en": "Bluebird" },
+  "name": {
+    "zh": "青鸟收藏夹",
+    "en": "Bluebird"
+  },
   "icon": "video",
   "iconFile": "icon.png",
-  "version": "2.0.2",
+  "version": "2.3.0",
   "layout": {
     "main": [
-      { "type": "plugin:bluebird:folder", "params": { "nativeWorkbench": true } },
-      { "type": "amadeus-editor", "params": { "reuseKey": "bluebird-document" }, "split": "right" },
-      { "type": "chat-panel", "params": { "reuseKey": "bluebird-chat", "autoRefFromMain": true }, "split": "down", "splitFrom": 0 }
+      {
+        "type": "plugin:bluebird:folder",
+        "params": {
+          "nativeWorkbench": true
+        }
+      }
     ],
-    "left": [{ "type": "workspace", "params": { "mode": "plugin:bluebird:library-list" } }]
+    "left": [
+      {
+        "type": "workspace",
+        "params": {
+          "mode": "plugin:bluebird:library-list"
+        }
+      }
+    ]
   },
-  "requires": { "views": ["plugin:bluebird:folder", "amadeus-editor", "chat-panel"] }
+  "requires": {
+    "views": [
+      "plugin:bluebird:folder",
+      "amadeus-editor",
+      "chat-panel"
+    ]
+  }
 }
