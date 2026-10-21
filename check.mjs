@@ -728,6 +728,14 @@ A.equal(T.t('queueTitle'), '分析队列')
   }finally{globalThis.fetch=fetchBefore;globalThis.window=windowBefore}
 }
 
+// Legacy diagnostics distinguish unreadable indexes from an empty folder.
+{
+ const p='青鸟收藏夹/.bluebird-index.json',before=V.get(p)
+ V.set(p,'{broken')
+ A.ok((await T.legacyData()).some(item=>item.folder==='青鸟收藏夹'&&item.error))
+ if(before===undefined)V.delete(p);else V.set(p,before)
+}
+
 // Protect unreadable indexes and refuse unsafe saves on an older host.
 {
   const path=T.folderRoot()+'/.bluebird-index.json',previous=V.get(path),count=writes.length

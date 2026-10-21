@@ -37,6 +37,7 @@ async function main(){
   await win.locator('.bb-recovery button').first().click();await win.locator('.bb-recovery button').first().click()
   await win.waitForFunction(()=>localStorage.getItem('plugin.bluebird.workFolder')==='青鸟收藏夹')
   check('legacy note is unchanged',fs.readFileSync(path.join(vault,'青鸟收藏夹','历史笔记.md'),'utf8').includes('User content must stay unchanged'))
+  await win.getByText('历史收藏',{exact:true}).click();await win.waitForFunction(()=>document.body.innerText.includes('User content must stay unchanged.'));check('restored legacy detail opens its original note',true);await win.locator('.bb-native [data-back]').click()
   await win.locator('[data-url]').fill('https://www.bilibili.com/video/BV1G4Jy6wEok/')
   await win.locator('[data-url]').press('Enter');check('Enter does not submit',stub.seen.runs.length===0)
   await win.locator('[data-requirements]').fill('保留原术语，整理为中英学习资料，包含自测题。')

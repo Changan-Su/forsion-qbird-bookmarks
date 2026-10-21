@@ -229,6 +229,8 @@ Object.assign(MSG.zh, {
   "hostUpgradeToSave": "请先升级配套桌面端，再保存新收藏；现有收藏仍可阅读和导出。",
   "indexInvalid": "收藏索引无法读取，已停止保存以保护现有资料。",
   "legacyFound": "发现旧资料：{count} 条收藏位于 {folder}。",
+  "legacyCompare": "当前 {current} 有 {currentCount} 条收藏；旧目录 {folder} 有 {count} 条。",
+  "legacyReadError": "无法读取 {folder} 的收藏索引，请先检查资料。",
   "legacyUse": "继续使用旧目录",
   "legacyLater": "稍后处理",
   "legacyConfirm": "继续使用 {folder}？现有文件保留原位，之后新增收藏也保存到这里。",
@@ -281,6 +283,8 @@ Object.assign(MSG.en, {
   "hostUpgradeToSave": "Update the companion desktop app before saving new bookmarks. Existing bookmarks remain readable and exportable.",
   "indexInvalid": "The bookmark index could not be read. Saving has stopped to protect existing data.",
   "legacyFound": "Previous data found: {count} bookmarks in {folder}.",
+  "legacyCompare": "{current} has {currentCount} bookmarks; the previous folder {folder} has {count}.",
+  "legacyReadError": "Could not read the bookmark index in {folder}. Check the data before recovery.",
   "legacyUse": "Use previous folder",
   "legacyLater": "Later",
   "legacyConfirm": "Continue using {folder}? Existing files stay in place, and new bookmarks will be saved there.",
@@ -786,13 +790,16 @@ async function readIndex() {
   return cur || { folders: [], items: [] }
 }
 async function legacyData() {
-  const current = folderRoot(), vault = taskScope(), found = []
-  for (const folder of ['青鸟收藏夹','Bluebird','videos']) {
-    if (folder === current) continue
-    const index = await readIndexAt(folder)
-    if (index?.items.length) found.push({ folder, count:index.items.length })
+  const current=folderRoot(),vault=taskScope(),found=[]
+  let currentCount=0
+  try{currentCount=(await readIndexAt(current,true))?.items.length || 0}
+  catch{return [{folder:current,error:true}]}
+  for(const folder of ['青鸟收藏夹','Bluebird','videos']){
+    if(folder===current)continue
+    try{const index=await readIndexAt(folder,true);if(index?.items.length)found.push({folder,count:index.items.length,current,currentCount})}
+    catch{found.push({folder,error:true})}
   }
-  return vault === taskScope() && current === folderRoot() ? found : []
+  return vault===taskScope()&&current===folderRoot() ? found:[]
 }
 function useLegacyFolder(folder) {
   if (!['青鸟收藏夹','Bluebird','videos'].includes(folder)) return
@@ -1707,7 +1714,7 @@ function mountAnalyze(el, viewCtx) {
       }catch(error){say2(String(error?.message||error),{level:'error'})}
     }
     const generation=openGeneration,scope=playbackScope()
-    legacyData().then(found=>{if(disposed||cur.kind!=='home'||generation!==openGeneration||scope!==playbackScope())return;const box=$('[data-legacy]');for(const item of found){const notice=document.createElement('div');notice.className='bb-recovery';const text=document.createElement('p');text.textContent=t('legacyFound',item);notice.appendChild(text);const action=document.createElement('button');action.className='bb-btn sm';action.textContent=t('legacyUse');action.onclick=()=>{text.textContent=t('legacyConfirm',item);action.textContent=t('ok');action.onclick=()=>{if(scope===playbackScope())useLegacyFolder(item.folder)}};notice.appendChild(action);box.appendChild(notice)}})
+    legacyData().then(found=>{if(disposed||cur.kind!=='home'||generation!==openGeneration||scope!==playbackScope())return;const box=$('[data-legacy]');for(const item of found){const notice=document.createElement('div');notice.className='bb-recovery';const text=document.createElement('p');text.textContent=t(item.error?'legacyReadError':item.currentCount?'legacyCompare':'legacyFound',item);notice.appendChild(text);if(item.error){box.appendChild(notice);continue}const action=document.createElement('button');action.className='bb-btn sm';action.textContent=t('legacyUse');action.onclick=()=>{text.textContent=t('legacyConfirm',item);action.textContent=t('ok');action.onclick=()=>{if(scope===playbackScope())useLegacyFolder(item.folder)}};notice.appendChild(action);box.appendChild(notice)}})
     check();renderQueue()
     runtimeReady.then(()=>{if(cur.kind==='home'&&generation===openGeneration){const saved=runtime.drafts[draftKey];if(saved&&!urlEl.value&&!req.value){Object.assign(draft,saved);fill();check()}}})
   }
