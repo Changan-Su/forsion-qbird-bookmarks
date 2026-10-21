@@ -1095,6 +1095,8 @@ const queue = { items: [], processing: false }
 let runtime = { version: 1, tasks: [], drafts: {}, presets: [] }, runtimeTimer = null, runtimeChain = Promise.resolve(), pluginDisposed = false
 const taskScope = () => String(ctx.app.vaultRoot?.() || '')
 const belongsHere = (it) => !it.vault || it.vault === taskScope()
+let observedScope=playbackScope()
+const scopeTick=setInterval(()=>{const next=playbackScope();if(next!==observedScope){observedScope=next;bus.emit({type:'scope-changed'})}},500)
 function redact(value) {
   const clean = (s) => String(s).replace(/(Bearer\s+)[\w.~+\/=:-]+/gi, '$1[REDACTED]')
     .replace(/([?&](?:token|access_token|api_key|key|signature|sign|policy|auth|wsSecret|wsTime|deadline|expires|x-amz-[\w-]+)=)[^&\s"<>]+/gi, '$1[REDACTED]')
@@ -2126,7 +2128,7 @@ function mountAnalyze(el, viewCtx) {
     visible: () => root.isConnected && root.getClientRects().length > 0, open: ref => openSaved(ref.entryId, { ...ref, playbackOnly: true }) }
   playbackTargets.add(playbackTarget)
   const offBus = bus.on((e) => {
-    if (e.type === 'folder-changed') { renderHome(); return }
+    if (e.type === 'folder-changed' || (e.type==='scope-changed' && cur.kind==='home')) { renderHome(); return }
     if (e.type === 'open') { consume(e); return }
     if (e.type === 'queue') {
       if (cur.kind === 'home') { renderQueue(); return }
@@ -2195,7 +2197,7 @@ function mountLog(el) {
   }
   select.onchange=()=>{chosen=select.value;refresh()};raw.onchange=refresh
   for(const format of ['txt','json'])root.querySelector('[data-'+format+']').onclick=()=>{const task=qFind(chosen);if(!task)return;downloadText('bluebird-log-'+task.id+'.'+format,format==='txt'?logText(task,raw.checked):JSON.stringify(logExport(task,raw.checked),null,2),format==='json'?'application/json':'text/plain;charset=utf-8')}
-  const offBus=bus.on(event=>{if(event.type==='log-open'){chosen=event.id;refresh()}else if(['log','queue','saved'].includes(event.type)){clearTimeout(timer);timer=setTimeout(refresh,200)}})
+  const offBus=bus.on(event=>{if(event.type==='log-open'){chosen=event.id;refresh()}else if(['log','queue','saved','scope-changed'].includes(event.type)){clearTimeout(timer);timer=setTimeout(refresh,200)}})
   const offLocale=ctx.subscribeLocale?.(()=>{root.querySelector('[data-txt]').textContent=t('logTxt');root.querySelector('[data-json]').textContent=t('logJson');root.querySelector('[data-raw-label]').textContent=t('rawTools');root.querySelector('[data-log-hint]').textContent=t('logPartial')+' '+t('logRedacted');select.setAttribute('aria-label',t('logTitle'));refresh()})
   runtimeReady.then(refresh);refresh()
   return()=>{disposed=true;clearTimeout(timer);offBus();offTheme();offLocale?.()}
@@ -2320,6 +2322,7 @@ return () => { // 插件停用才断分析
   pluginDisposed = true; document.removeEventListener?.('click',onDocumentClick,true);_layer?.remove?.();_layer=null;clearTimeout(runtimeTimer); void persistRuntime(true)
   if (sb && sb.dispose) sb.dispose()
   if (offLocaleTop) offLocaleTop()
+  clearInterval(scopeTick)
   clearInterval(modeTick) // 不清会吊住 node 事件循环(check.mjs 直接挂住),插件停用后也不该再写盘
   queue.items.forEach((i) => { if (i.controller) i.controller.abort() })
 }

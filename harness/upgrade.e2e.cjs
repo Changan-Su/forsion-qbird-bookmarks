@@ -89,6 +89,8 @@ async function main(){
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1440,950))
   await win.evaluate(()=>localStorage.setItem('tangu_locale','en'));await win.reload();await win.waitForFunction(()=>!!globalThis.__bbUpgrade);await win.evaluate(()=>__bbUpgrade.ctx.app.openSpace('bluebird'));await win.waitForSelector('[data-requirements]')
   check('English collection labels are translated',await win.locator('[data-go]').innerText()==='Save and organize'&&await win.locator('[data-bi]').innerText()==='Bilingual text')
+  await win.waitForFunction(()=>document.querySelector('[data-requirements]')?.value==='重开后保留的要求'&&document.querySelector('[data-log-text]')?.textContent.includes('run_started'))
+  check('reload refreshes drafts and logs after lazy vault restore',true)
   await win.waitForSelector('#tangu-splash',{state:'hidden',timeout:30000});await win.waitForTimeout(300);await win.screenshot({path:path.join(OUT,'collect-english.png')})
   fs.writeFileSync(path.join(OUT,'report.json'),JSON.stringify({checks,home,vault},null,2))
   console.log(JSON.stringify({passed:checks.length,home,output:OUT}))
