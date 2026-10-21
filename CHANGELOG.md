@@ -1,4 +1,8 @@
-## 2.3.1 — Automatic upgrade migration and Bilibili retrieval / 自动迁移与 B 站获取修复
+## 2.3.1 — 2026-10-21
+
+Automatic upgrade migration and Bilibili retrieval / 自动迁移与 B 站获取修复
+
+- Requires Forsion desktop 2.13.6 or later for scoped bookmark saves and the paired migration API. 需要桌面端 2.13.6 或以上，避免旧宿主缺少保存接口时更新插件。
 
 - Old vault-root data automatically copies to the default `Plugins/bluebird` on a host with the migration API. Index/sidecar note paths are updated; original notes and media remain as backup. Completion is recorded per vault, and deleted records are not imported again.
 - Manual work-folder choices are respected. Conflicting collections or damaged/missing files stop migration and keep the recovery entry available. Existing target assets are retained.

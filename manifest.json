@@ -4,6 +4,7 @@
   "nameEn": "Bluebird",
   "version": "2.3.1",
   "apiVersion": 1,
+  "minAppVersion": "2.13.6",
   "description": "收藏链接，按你的要求整理成双语文本或学习资料。支持分析日志导出和旧版资料自动迁移。仅收藏与阅读已有资料可离线完成；视频获取和 AI 整理依赖宿主的执行、转写及模型能力。",
   "descriptionEn": "Save links and organize content into bilingual text or study material using your instructions. Export analysis logs and automatically migrate previous-version data. Saving links and reading saved content work offline; fetching videos and AI organization require the host’s execution, transcription and model capabilities.",
   "main": "main.js",
