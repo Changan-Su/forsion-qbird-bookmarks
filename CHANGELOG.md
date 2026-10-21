@@ -1,3 +1,10 @@
+## 2.3.1 — Automatic upgrade migration and Bilibili retrieval / 自动迁移与 B 站获取修复
+
+- Old vault-root data automatically copies to the default `Plugins/青鸟收藏夹` on a host with the migration API. Index/sidecar note paths are updated; original notes and media remain as backup. Completion is recorded per vault, and deleted records are not imported again.
+- Manual work-folder choices are respected. Conflicting collections or damaged/missing files stop migration and keep the recovery entry available. Existing target assets are retained.
+- Connect Bilibili pages without embedded metadata to the player's signed metadata/media APIs. Keep platform-provided CDN mirrors and use one if the primary media host fails. Public video BV1G4Jy6wEok was freshly fetched with Forsion's bundled Python: 536.404 seconds, 5,983,005-byte original audio and 16 kHz mono WAV.
+- 新版宿主支持旧资料一次自动迁移；保留原目录备份、手动目录设置及迁移失败恢复入口。修复缺少页面数据和主 CDN 拒绝叠加的 B 站获取失败。
+
 ## 2.3.0 — Instructions and recoverable analysis / 整理要求与可恢复分析
 
 - Focused collection form, editable bilingual/study presets and saved instruction drafts; queued tasks keep their submitted instructions.

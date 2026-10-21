@@ -106,3 +106,6 @@ node verify.mjs      # 校验 skill/agent/plugin 契约 + 跑 plugin check.mjs(�
 
 - Older hosts without scoped writes refuse new bookmark saves instead of falling back to unscoped IPC. Unreadable indexes stop saves. The host ASR bridge cannot abort an in-flight request; cancellation waits for it to return before stopping further generation.
 - The command palette also exposes Analysis log, including tasks hidden by queue cleanup.
+
+
+Fresh network acceptance (no cached media): run Forsion's bundled Python with `harness/retrieval.live.py --out outputs/retrieval-live`. It fetches BV1G4Jy6wEok into a fresh temporary directory and checks source identity, audio duration, WAV rate/channels and archive bytes/hash. `node harness/upgrade.e2e.cjs` now covers automatic migration, native note opening, original backup and restart without duplicate imports.

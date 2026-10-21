@@ -799,6 +799,28 @@ A.equal(T.t('queueTitle'), '分析队列')
   }finally{globalThis.fetch=oldFetch;globalThis.window=oldWindow}
 }
 
+// Schema migration plans use the host transaction and preserve manual folders.
+{
+ const oldRoot=VAULT.root,oldFolder=ctx.app.workFolder,oldMigration=ctx.app.migrateWorkFolder,oldCustom=_ls.get('plugin.bluebird.workFolder')
+ VAULT.root='/migration-fixture';_ls.delete('plugin.bluebird.workFolder');ctx.app.workFolder=()=> 'Plugins/青鸟收藏夹'
+ V.set('青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[{id:'legacy-entry',notePath:'青鸟收藏夹/note.md'}]}))
+ V.set('青鸟收藏夹/.bluebird/legacy-entry.json',JSON.stringify({id:'legacy-entry',notePath:'青鸟收藏夹/note.md',summaryMarkdown:'# Original'}));V.set('青鸟收藏夹/note.md','# User edits')
+ let plan,done=false,calls=0
+ ctx.app.migrateWorkFolder=async request=>{
+  calls++
+  if(!request.plan)return {status:done?'complete':'needed'}
+  plan=request;for(const edit of request.plan.edits)V.set(request.target+'/'+edit.path,edit.after)
+  V.set(request.target+'/note.md',V.get(request.source+'/note.md'));done=true;return {status:'complete'}
+ }
+ try{
+  await T.upgradeStorage();A.equal(plan.source,'青鸟收藏夹');A.equal(plan.plan.index.before,null)
+  A.equal(JSON.parse(V.get('Plugins/青鸟收藏夹/.bluebird/legacy-entry.json')).notePath,'Plugins/青鸟收藏夹/note.md')
+  A.equal(V.get('青鸟收藏夹/note.md'),'# User edits');A.equal(_ls.get('plugin.bluebird.workFolder'),undefined)
+  const n=calls;await T.upgradeStorage();A.equal(calls,n);A.deepEqual(await T.legacyData(),[])
+  VAULT.root='/custom-folder-fixture';_ls.set('plugin.bluebird.workFolder','My bookmarks');await T.upgradeStorage();A.equal(calls,n)
+ }finally{VAULT.root=oldRoot;ctx.app.workFolder=oldFolder;ctx.app.migrateWorkFolder=oldMigration;if(oldCustom===undefined)_ls.delete('plugin.bluebird.workFolder');else _ls.set('plugin.bluebird.workFolder',oldCustom)}
+}
+
 // Disabling during host ASR stops before a second model run can start.
 {
   const oldFetch=globalThis.fetch,oldWindow=globalThis.window

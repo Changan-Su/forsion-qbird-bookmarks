@@ -230,6 +230,9 @@ Object.assign(MSG.zh, {
   "indexInvalid": "收藏索引无法读取，已停止保存以保护现有资料。",
   "legacyFound": "发现旧资料：{count} 条收藏位于 {folder}。",
   "legacyCompare": "当前 {current} 有 {currentCount} 条收藏；旧目录 {folder} 有 {count} 条。",
+  "migrationDone": "历史收藏已迁移到 Plugins；旧目录保留为备份。",
+  "migrationConflict": "发现多份历史资料或新目录已有收藏，请先使用恢复入口检查。",
+  "migrationFailed": "自动迁移未完成，原资料已保留：{message}",
   "legacyReadError": "无法读取 {folder} 的收藏索引，请先检查资料。",
   "legacyUse": "继续使用旧目录",
   "legacyLater": "稍后处理",
@@ -284,6 +287,9 @@ Object.assign(MSG.en, {
   "indexInvalid": "The bookmark index could not be read. Saving has stopped to protect existing data.",
   "legacyFound": "Previous data found: {count} bookmarks in {folder}.",
   "legacyCompare": "{current} has {currentCount} bookmarks; the previous folder {folder} has {count}.",
+  "migrationDone": "Previous bookmarks migrated to Plugins. The original folder is retained as a backup.",
+  "migrationConflict": "Multiple data sets exist or the new folder already has bookmarks. Review the recovery options first.",
+  "migrationFailed": "Automatic migration could not finish. Original data is retained: {message}",
   "legacyReadError": "Could not read the bookmark index in {folder}. Check the data before recovery.",
   "legacyUse": "Use previous folder",
   "legacyLater": "Later",
@@ -786,11 +792,61 @@ async function readIndexAt(root, strict = false) {
   } catch(error) { if(strict)throw Error(t('indexInvalid'));return null }
 }
 async function readIndex() {
+  if(ctx.app.migrateWorkFolder)await upgradeStorage()
   const cur = await readIndexAt(folderRoot(),true)
   return cur || { folders: [], items: [] }
 }
+// One migration per vault. Kept separate from runtime tasks so first list/read/save
+// waits for it, including after switching libraries. The host owns copies and journal.
+const storageUpgrades = new Map(), storageMigrated = new Set()
+function upgradeStorage() {
+  const vault=ctx.app.vaultRoot?.(),target=folderRoot(),scope=`${vault}\n${target}`
+  if(!vault || !ctx.app.migrateWorkFolder || localStorage.getItem(`plugin.${PLUGIN_ID}.workFolder`) || !target.startsWith('Plugins/'))return Promise.resolve()
+  if(storageUpgrades.has(scope))return storageUpgrades.get(scope)
+  const work=(async()=>{
+    const check=()=>{if(vault!==ctx.app.vaultRoot?.()||target!==folderRoot())throw Error(t('vaultChanged'))}
+    const candidates=['青鸟收藏夹','Bluebird','videos'],id='legacy-root-v1'
+    if((await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source:candidates[0],target})).status==='complete'){storageMigrated.add(scope);return}
+    check()
+    const found=[]
+    for(const source of candidates){const index=await readIndexAt(source,true);check();if(index?.items.length)found.push({source,index})}
+    if(!found.length)return
+    if(found.length!==1)throw Error(t('migrationConflict'))
+    const {source,index}=found[0],before=await ctx.app.readFile(`${target}/.bluebird-index.json`);check()
+    const current=await readIndexAt(target,true);check()
+    if(current?.items.length || current?.folders.length)throw Error(t('migrationConflict'))
+    const edits=[],requiredFiles=[],remap=path=>{
+      if(typeof path!=='string'||!path.startsWith(source+'/')||path.split('/').some(x=>!x||x==='.'||x==='..')||path.includes('\\'))throw Error(t('indexInvalid'))
+      return target+path.slice(source.length)
+    }
+    const items=[]
+    for(const item of index.items){
+      if(!validEntryId(item.id))throw Error(t('indexInvalid'))
+      const path=`.bluebird/${item.id}.json`,raw=await ctx.app.readFile(`${source}/${path}`);check()
+      const entry=JSON.parse(raw||'null')
+      if(!entry||entry.id!==item.id||!entry.notePath)throw Error(t('indexInvalid'))
+      const note=await ctx.app.readFile(entry.notePath);check()
+      if(note===null)throw Error(t('indexInvalid'))
+      const notePath=remap(entry.notePath)
+      const media=archivedMediaName(entry.summaryMarkdown)
+      if(media)requiredFiles.push(`${ASSETS_SUBDIR}/${media}`)
+      if(item.notePath&&item.notePath!==entry.notePath)throw Error(t('indexInvalid'))
+      edits.push({path,before:raw,after:JSON.stringify({...entry,notePath})});items.push({...item,notePath})
+    }
+    const path='.bluebird-index.json',raw=await ctx.app.readFile(`${source}/${path}`);check()
+    const latest=JSON.parse(raw||'null')
+    if(JSON.stringify(latest?.items)!==JSON.stringify(index.items)||JSON.stringify(latest?.folders||[])!==JSON.stringify(index.folders))throw Error(t('vaultChanged'))
+    const after=JSON.stringify({...index,items},null,2)
+    edits.push({path,before:raw,after})
+    await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source,target,plan:{index:{path,before,after},edits,requiredFiles}});check()
+    storageMigrated.add(scope);ctx.notify?.(t('migrationDone'),{level:'success'})
+  })().catch(error=>{ctx.notify?.(t('migrationFailed',{message:String(error.message||error)}),{level:'error'});throw error})
+  storageUpgrades.set(scope,work);return work
+}
 async function legacyData() {
   const current=folderRoot(),vault=taskScope(),found=[]
+  try{await upgradeStorage()}catch{}
+  if(storageMigrated.has(`${vault}\n${current}`))return []
   let currentCount=0
   try{currentCount=(await readIndexAt(current,true))?.items.length || 0}
   catch{return [{folder:current,error:true}]}
@@ -899,6 +955,7 @@ async function saveEntryInner(full,vault,folder) {
 }
 const loadEntry = async (id) => {
   try {
+    await upgradeStorage()
     const t = (await ctx.app.readFile(dataPath(id))) || (folderRoot() !== LEGACY_ROOT ? await ctx.app.readFile(`${LEGACY_ROOT}/.bluebird/${id}.json`) : null)
     return t ? JSON.parse(t) : null
   } catch { return null }
@@ -1085,6 +1142,7 @@ async function ensureWorkFolder() {
   if (!root) return // 老宿主没有库就绪信号时也不预建;首次保存会自然建立目录。
   const folder = folderRoot()
   try {
+    await upgradeStorage()
     const existing = await ctx.app.readFile(`${folder}/.bluebird-index.json`)
     if (existing !== null || ctx.app.vaultRoot() !== root || folderRoot() !== folder) return
     await ctx.app.writeFile(`${folder}/.bluebird-index.json`, JSON.stringify({ folders: [], items: [] }, null, 2))
@@ -1227,6 +1285,7 @@ async function qCancel(id) {
 async function qPump() {
   if (queue.processing) return
   await runtimeReady
+  try{await upgradeStorage()}catch{return}
   if (queue.processing || pluginDisposed) return
   const it = queue.items.find((i) => i.status === 'pending' && !i.hidden && belongsHere(i))
   if (!it) return
@@ -2321,7 +2380,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
   Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
