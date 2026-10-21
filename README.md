@@ -2,9 +2,11 @@
 
 把一条视频链接变成可读、可检索、可入库的知识笔记 —— 直接在 Forsion 工作台里完成。
 
-**2.3.0:** 新建收藏时可填写整理要求，常用要求可编辑；仅收藏保留要求，任务固定提交时的原文。原生阅读工作台按需展开，任务日志可在成功、失败或取消后导出。断线恢复会接回原运行，重新整理保留已有笔记。旧目录资料先检测、确认后接回，不自动迁移。
+**宿主版本：** 2.3.1 需要 Forsion 桌面端 2.13.6 或以上，旧客户端请先升级桌面端。**Host version:** 2.3.1 requires Forsion desktop 2.13.6 or later; update the desktop app before updating this plugin.
 
-**English:** Add editable instructions to each bookmark. Save-only preserves them; analysis snapshots them. Native reading companions open on demand. Saved logs remain exportable after success, failure or cancellation. Reconnect resumes the original run, new result versions keep existing notes, and previous folders are reconnected only after confirmation. Platform restrictions can still prevent retrieval; local subtitle/media import is available.
+**2.3.1:** 新建收藏时可填写整理要求，常用要求可编辑；仅收藏保留要求，任务固定提交时的原文。原生阅读工作台按需展开，任务日志可在成功、失败或取消后导出。断线恢复会接回原运行，重新整理保留已有笔记。新版桌面宿主支持一次自动迁移旧资料到 `Plugins/bluebird`，保留原目录备份并尊重手动设置；同时修复 B 站页面数据缺失和主 CDN 获取失败时的回退。
+
+**English:** Add editable instructions to each bookmark. Save-only preserves them; analysis snapshots them. Native reading companions open on demand. Saved logs remain exportable after success, failure or cancellation. Reconnect resumes the original run and new result versions keep existing notes. Supported desktop hosts migrate legacy data once to `Plugins/bluebird`, retaining the original folder and respecting custom settings. Bilibili retrieval now handles missing page metadata and falls back to platform CDN mirrors. Platform restrictions can still prevent retrieval; local subtitle/media import is available.
 
 Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-run`). `bash install.sh dev` upgrades the existing manifest id, including installations named `item`, with a rollback copy under `backups/plugin-upgrades/`. It does not rewrite seeded agent configuration, memory, modified skills or vault data. Restart the host to load the bundle; the engine's fingerprint-based skill updater preserves user changes. Full focused/reading layout and filesystem-scoped writes require the companion-capable host supplied with this change. Older hosts retain existing bookmark reading/export; new saves require the paired host update.
 
