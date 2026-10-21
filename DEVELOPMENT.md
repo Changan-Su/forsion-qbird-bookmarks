@@ -85,10 +85,24 @@ node verify.mjs      # 校验 skill/agent/plugin 契约 + 跑 plugin check.mjs(�
 
 `check.mjs` 还断言零网络收藏/重新读取、同标题不覆盖、云端/虚拟路径拒绝、资源 URL 桥、本机执行门控及 Unit 会话令牌原样传递。验证器允许 Space 使用宿主的 `workspace` 视图,并识别现有 `transcribe_audio` 工具;它们是宿主能力,不是本插件捏造的贡献点。完整 Unit 浏览器验收还需要使用 Genesis 的独立安装产物,本脚本的内存文件桥不等同于真实持久化验证。
 
-**真身层(需真机,手动验收):** 转录要跑本机 yt-dlp + 真实网络,只能在跑着的桌面上验:`install.sh dev` → 重启 desktop → 命令面板「青鸟收藏夹:打开」→ 贴一条有字幕的视频(如任意 YouTube)→ 看总结直播出来 → 「保存到笔记」确认落到 `videos/`。
+**平台联网验收 / Live platform checks:** 使用配套桌面构建和隔离 home 验证真实网络取流；保存位置跟随工作文件夹，当前默认 `Plugins/青鸟收藏夹`。`upgrade.py prod --dry-run` 只预览实际安装目标，不写入安装版。Platform fetching needs a real network run with the paired desktop build and an isolated home; default storage follows the host work folder.
 
 ## 边界(v1 刻意不做)
 
 - 超长视频的 ASR 分片并发(Bluebird 原有 ffmpeg 切片)未做;原生字幕无此限制。
 - 视图内 Markdown 预览不渲染表格(降级为文本);存进 Amadeus 的笔记表格正常。
 - 依赖本机 Tangu 与 yt-dlp;小红书等随 yt-dlp 支持度变化。
+
+
+## 2.3 regression checks / 升级回归
+
+- `node verify.mjs` — plugin, bilingual, persistence, scoped-save and event replay contracts.
+- `python3 -m unittest discover -s tests` — runtime headers, error stages, safe upgrades and duplicate installation ids.
+- `BLUEBIRD_DESKTOP=/absolute/desktop node harness/upgrade.e2e.cjs` — compiled isolated Electron, real file IO, legacy-folder confirmation, frozen instructions, native note rendering, log download, engine cancellation, subtitle retry and restart. Run through the repository devlock. Engine responses are scripted; this does not prove model behavior or platform access.
+- From the paired host's `tangu-agent`, run the root `harness-runs/archive.mjs run --label "Bluebird instructions" -- --only bluebird --plugin-src /absolute/bluebird --model codex/gpt-6-luna` for real bilingual and language-override checks. Uses supplied source text; platform fetching is a separate acceptance step.
+- The analysis queue is stored via host `loadData/saveData`. Queue removal/cleanup hides tasks while retaining their logs. It stores run/session identities and engine URLs, never a bearer token. Log exports redact sensitive values and flag missing/truncated records.
+- `transcribe.py --diagnose` reports the actual execution runtime; `--local-file /absolute/media` converts selected media for host ASR. Initial-state extraction failures are not image posts. HTTP 412/567 and login/region restrictions remain failures, with next actions.
+- 截图和临时智库保存在忽略的 `outputs/` 及系统临时目录，不进入 bundle。个人资料不作为测试夹具。安装验证使用显式 `--target-home`，实际安装版只做 `--dry-run`。
+
+- Older hosts without scoped writes refuse new bookmark saves instead of falling back to unscoped IPC. Unreadable indexes stop saves. The host ASR bridge cannot abort an in-flight request; cancellation waits for it to return before stopping further generation.
+- The command palette also exposes Analysis log, including tasks hidden by queue cleanup.

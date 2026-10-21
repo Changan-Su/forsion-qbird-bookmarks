@@ -55,6 +55,11 @@ const dispose = new Function('ctx', src)(ctx)
 const V = new Map(); const writes = []
 ctx.app.readFile = async (p) => (V.has(p) ? V.get(p) : null)
 ctx.app.writeFile = async (p, t) => { V.set(p, t); writes.push(p) }
+ctx.app.writeFileScoped = async (p,t,root,{create=false}={}) => {
+  if(root!==VAULT.root)throw Error('vault changed')
+  if(create && V.has(p))return false
+  await ctx.app.writeFile(p,t);return true
+}
 
 // ── 贡献点契约 ──
 A.equal(typeof dispose, 'function', 'setup 应返回 disposer')
@@ -301,10 +306,10 @@ A.equal(q1.error, '', '有词表键时不许再往 error 里塞成品串')
 A.equal(T.qErrText({ errKey: '', error: 'boom from engine' }), 'boom from engine', '引擎回的原始错误没有键 → 裸串照出')
 T.queue.items.push({ id: 'done1', status: 'completed' })
 T.qClearDone()
-A.ok(!T.queue.items.find((i) => i.id === 'done1'), '清除已完成应移除 completed 项')
+A.ok(T.queue.items.find((i) => i.id === 'done1').hidden, '清除已完成只收起任务，保留日志')
 A.ok(T.queue.items.find((i) => i.id === q1.id), '清除已完成不动 error 项')
 T.qRemove(q1.id); T.qRemove(q2.id)
-A.equal(T.queue.items.length, 0, '移除后队列应清空')
+A.equal(T.queue.items.filter(i=>!i.hidden).length, 0, '移除后可见队列应清空，日志仍可查询')
 
 // 阶段映射:pct 单调有据 + 五态过程枚举(parsing/transcribing);**返回键不返回串**(1.5.1)
 A.deepEqual(T.stageOf({ type: 'status', payload: { state: 'queued' } }, ''), { pct: 10, key: 'stQueued', st: 'parsing' })
@@ -478,7 +483,7 @@ A.equal(T.qStageText(enQ), 'Queued', 'en 下新入队项的阶段文案应是英
 await new Promise((r) => setTimeout(r, 40))
 A.equal(T.qErrText(enQ), 'Not connected to the Tangu engine', 'en 下队列错误文案应是英文')
 T.qRemove(enQ.id)
-A.equal(T.queue.items.length, 0)
+A.equal(T.queue.items.filter(i=>!i.hidden).length, 0)
 
 // ── 双语 ②′ 切语言重画不许吞掉用户正在编辑的现场(1.5.1 回归闸:repaint 整树重建前后搬运) ──
 // QA 记录只活在 DOM 里(没有 state 备份),抹了就是真丢 —— 所以这里断言的是节点**同一性**。
@@ -679,9 +684,136 @@ A.equal(T.t('queueTitle'), '分析队列')
   }
 }
 
+// Upgrade: requirements survive bookmarks; reorganization cannot overwrite a same-title note.
+{
+  const saved=await T.saveLink('https://example.com/study','Make Chinese-English study cards')
+  A.equal((await T.loadEntry(saved.id)).requirements,'Make Chinese-English study cards')
+  const one=await T.saveEntry({summaryMarkdown:'# Same title\n\nFirst',sourceUrl:'https://example.com/one',meta:{}})
+  V.set(one.notePath,'User edited note')
+  const two=await T.saveEntry({summaryMarkdown:'# Same title\n\nSecond',sourceUrl:'https://example.com/two',meta:{}})
+  A.notEqual(one.notePath,two.notePath)
+  A.equal(V.get(one.notePath),'User edited note')
+}
+// A vault change during the index read must reject before writing any note or index.
+{
+ const read=ctx.app.readFile,rootBefore=VAULT.root,before=writes.length
+ ctx.app.readFile=async path=>{const value=await read(path);if(path.endsWith('/.bluebird-index.json'))VAULT.root='/different-vault';return value}
+ try{await A.rejects(T.saveEntry({summaryMarkdown:'# Scope change',meta:{},sourceUrl:'https://example.com'}),/智库|vault/i);A.equal(writes.length,before)}finally{ctx.app.readFile=read;VAULT.root=rootBefore}
+}
+
+// Upgrade: real event replay, duplicate event ids, safe export and durable tool details.
+{
+  const fetchBefore=globalThis.fetch,windowBefore=globalThis.window
+  const cfg={backendUrl:'http://fixture',token:'credential',hostExecution:true}
+  const task={id:'log-fixture',url:'https://example.com/video',requirements:'Bilingual study material',runs:[],logs:[]}
+  const events=[{seq:1,type:'tool_call',payload:{name:'run_bash',arguments:{authorization:'SECRET'}}},{seq:2,type:'tool_result',payload:{content:'HTTP 567: retrieval failed'}},{seq:3,type:'token',payload:{delta:'# Result'}},{seq:4,type:'done',payload:{content:'# Result'}}]
+  globalThis.fetch=async(url)=>url.endsWith('/agent/runs')?{ok:true,json:async()=>({runId:'run-fixture'})}:{ok:true,body:new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(events.map(e=>'data: '+JSON.stringify(e)+'\r\n').join('')));c.close()}})}
+  try{
+    A.equal(await T.runAgent(cfg,'session-fixture','Organize',null,null,null,task),'# Result')
+    A.equal(task.runs[0].id,'run-fixture')
+    A.ok(T.logText(task,true).includes('HTTP 567'))
+    A.ok(!T.logText(task,true).includes('SECRET'))
+    const before=task.logs.length
+    await T.streamRun(cfg,'run-fixture',null,null,null,task)
+    A.equal(task.logs.length,before,'replay must not duplicate saved engine events')
+    A.ok(!T.logExport(task,false).events.some(e=>e.type==='tool_call'))
+    A.ok(T.logExport(task,true).events.some(e=>e.type==='tool_result'))
+    let snapshot
+    ctx.saveData=async data=>{snapshot=structuredClone(data)}
+    T.queue.items.push(task);await T.persistRuntime(true)
+    A.ok(snapshot.tasks.find(it=>it.id===task.id).logs.length)
+    A.ok(!JSON.stringify(snapshot).includes('credential'))
+    T.qClearDone();A.ok(T.logText(task,true).includes('HTTP 567'),'queue cleanup keeps logs')
+    delete ctx.saveData
+  }finally{globalThis.fetch=fetchBefore;globalThis.window=windowBefore}
+}
+
+// Protect unreadable indexes and refuse unsafe saves on an older host.
+{
+  const path=T.folderRoot()+'/.bluebird-index.json',previous=V.get(path),count=writes.length
+  V.set(path,'{broken')
+  try{await A.rejects(T.saveEntry({summaryMarkdown:'# Keep data',meta:{}}),/索引|index/i);A.equal(writes.length,count)}finally{V.set(path,previous)}
+  const scoped=ctx.app.writeFileScoped;delete ctx.app.writeFileScoped
+  try{await A.rejects(T.saveLink('https://example.com/older-host'),/升级|Update/);A.equal(writes.length,count)}finally{ctx.app.writeFileScoped=scoped}
+}
+
+// Late cancellation responses cannot invalidate a completed result. A pending summary
+// start is cancelled by its own id, never by the previous transcript run's id.
+{
+  const oldFetch=globalThis.fetch,oldWindow=globalThis.window
+  const cfg={backendUrl:'http://fixture',token:'fixture',hostExecution:true}
+  globalThis.window={tangu:{getConfig:async()=>cfg}}
+  const task={id:'late-cancel',status:'parsing',runs:[{id:'old-transcript',backendUrl:cfg.backendUrl}],logs:[]}
+  T.queue.items.push(task)
+  let rejectAbort
+  globalThis.fetch=async()=>new Promise((_,reject)=>{rejectAbort=reject})
+  const cancellation=T.qCancel(task.id)
+  while(!rejectAbort)await new Promise(r=>setTimeout(r,0))
+  task.status='completed';rejectAbort(Error('late network failure'));await cancellation
+  A.equal(task.status,'completed')
+  const pending={id:'pending-summary',status:'transcribing',phase:'summary',runs:[{id:'transcript',backendUrl:cfg.backendUrl}],logs:[]}
+  T.queue.items.push(pending)
+  let resolveStart;const aborts=[]
+  globalThis.fetch=async(url)=>{
+    if(url.endsWith('/agent/runs'))return new Promise(resolve=>{resolveStart=resolve})
+    if(url.endsWith('/abort')){aborts.push(url);return new Response(JSON.stringify({settled:true,status:'aborted'}))}
+    throw Error('Cancelled task must never subscribe or save')
+  }
+  try{
+    const result=T.runAgent(cfg,'session','Summarize',null,null,null,pending)
+    while(!resolveStart)await new Promise(r=>setTimeout(r,0))
+    await T.qCancel(pending.id);A.equal(aborts.length,0)
+    resolveStart(new Response(JSON.stringify({runId:'summary'})))
+    await A.rejects(result,/取消|cancel/i)
+    A.equal(aborts.length,1);A.ok(aborts[0].includes('/summary/abort'))
+  }finally{globalThis.fetch=oldFetch;globalThis.window=oldWindow}
+}
+
+// Reconcile a lost second-phase start response and replay its original run. A second
+// reconnect must not generate another run or overwrite a user's edited note.
+{
+  const oldFetch=globalThis.fetch,oldWindow=globalThis.window
+  const cfg={backendUrl:'http://fixture',token:'fixture',hostExecution:true}
+  globalThis.window={tangu:{getConfig:async()=>cfg}}
+  const task={id:'recover-summary',status:'interrupted',startPending:true,phase:'summary',backendUrl:cfg.backendUrl,sessionId:'recover-session',runs:[{id:'transcript',backendUrl:cfg.backendUrl}],logs:[],url:'https://example.com/recovery',plat:T.parsePlatform('https://example.com/recovery'),vault:VAULT.root,workFolder:T.folderRoot(),progress:0}
+  T.queue.items.push(task);let posts=0
+  const body='# Recovered result\n\nSource material.\n\n```json bluebird\n'+JSON.stringify({meta:{title:'Recovered result'},segments:[]})+'\n```'
+  globalThis.fetch=async(url,options)=>{
+    if(options?.method==='POST'){posts++;throw Error('Must not resubmit')}
+    if(url.includes('?session_id='))return new Response(JSON.stringify({runs:[{id:'transcript'},{id:'summary'}]}))
+    A.ok(url.includes('/summary/events'))
+    return new Response('data: '+JSON.stringify({seq:1,type:'done',payload:{content:body}})+'\n\n')
+  }
+  try{
+    await T.qReconnect(task.id);A.equal(task.status,'completed');A.equal(task.runs.at(-1).id,'summary');A.equal(posts,0)
+    A.ok(task.notePath);V.set(task.notePath,'User edited recovered result');const before=writes.length
+    await T.qReconnect(task.id);A.equal(V.get(task.notePath),'User edited recovered result');A.equal(writes.length,before)
+  }finally{globalThis.fetch=oldFetch;globalThis.window=oldWindow}
+}
+
+// Disabling during host ASR stops before a second model run can start.
+{
+  const oldFetch=globalThis.fetch,oldWindow=globalThis.window
+  let resolveAsr,posts=0
+  globalThis.window={tangu:{getConfig:async()=>({backendUrl:'http://fixture',token:'fixture'}),transcribeAudioFile:()=>new Promise(resolve=>{resolveAsr=resolve})}}
+  const task={id:'disable-asr',status:'parsing',sessionId:'asr-session',runs:[],logs:[],url:'https://example.com/asr',plat:T.parsePlatform('https://example.com/asr'),vault:VAULT.root,workFolder:T.folderRoot(),progress:0}
+  T.queue.items.push(task)
+  globalThis.fetch=async(url)=>{
+    if(url.endsWith('/agent/runs')){posts++;return new Response(JSON.stringify({runId:'asr-input'}))}
+    const content='```json bluebird\n'+JSON.stringify({needs_asr:true,audio_path:'/tmp/fixture.wav',meta:{}})+'\n```'
+    return new Response('data: '+JSON.stringify({seq:1,type:'done',payload:{content}})+'\n\n')
+  }
+  const running=T.qRun(task)
+  while(!resolveAsr)await new Promise(r=>setTimeout(r,0))
+  A.equal(localeSubs.size,1)
+  dispose()
+  resolveAsr({text:'Transcribed source',segments:[]});await running
+  A.equal(posts,1,'disabled plugin cannot start the summary run');A.equal(task.status,'interrupted')
+  globalThis.fetch=oldFetch;globalThis.window=oldWindow
+}
+
 // ── 停用即收干净:顶层语言订阅 + 状态栏项(此前 mock 没有 subscribeLocale,那几行退订代码从没被执行过) ──
-A.equal(localeSubs.size, 1, 'dispose 前应还挂着顶层语言订阅')
-dispose()
+// dispose() was exercised while ASR was pending above.
 A.equal(localeSubs.size, 0, 'dispose() 必须退掉顶层语言订阅(否则插件停用后还在改状态栏/设置)')
 A.ok(reg.status[0].disposed, 'dispose() 必须收掉状态栏项')
 console.log(`check ok — ${reg.views.length} views / ${reg.commands.length} cmds / ${reg.settings.length} settings;XSS+平台+导出+队列状态机+建夹+双语(${zhKeys.length} 键 ×2)+切语言保现场+Unit 离线收藏/资源/执行断言通过`)

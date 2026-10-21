@@ -1,3 +1,13 @@
+## 2.3.0 — Instructions and recoverable analysis / 整理要求与可恢复分析
+
+- Focused collection form, editable bilingual/study presets and saved instruction drafts; queued tasks keep their submitted instructions.
+- Native reading companions appear on demand and keep their content when returning to collection. Requires the paired host update. Older hosts retain existing note reading/export; new saves require scoped-write support to prevent cross-vault writes.
+- Persistent task logs, TXT/JSON export, raw-tool option, redaction and explicit missing-history markers. Queue cleanup retains logs.
+- Cancellation checks the engine’s terminal status; interrupted tasks reconnect to the original run. New result versions retain existing notes.
+- Detect previous vault-root folders and explicitly reconnect without moving files. New and old data are never silently merged.
+- Retrieval diagnostics record the real Python/yt-dlp/ffmpeg runtime, platform headers and failure stage. Metadata parsing errors are no longer mistaken for image posts. Local media/subtitle import provides a recovery route.
+- 聚焦收集、可编辑整理要求、任务快照、原生日志面板和导出、取消确认与重连、旧目录检测均随此版本提供。平台限制仍可能阻止取流；没有承诺绕过登录或风控。
+
 # 更新日志
 
 ## 2.2.2 (2026-10-04)
