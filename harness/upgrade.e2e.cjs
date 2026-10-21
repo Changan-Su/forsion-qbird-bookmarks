@@ -89,7 +89,7 @@ async function main(){
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1440,950))
   await win.evaluate(()=>localStorage.setItem('tangu_locale','en'));await win.reload();await win.waitForFunction(()=>!!globalThis.__bbUpgrade);await win.evaluate(()=>__bbUpgrade.ctx.app.openSpace('bluebird'));await win.waitForSelector('[data-requirements]')
   check('English collection labels are translated',await win.locator('[data-go]').innerText()==='Save and organize'&&await win.locator('[data-bi]').innerText()==='Bilingual text')
-  await win.waitForTimeout(800);await win.screenshot({path:path.join(OUT,'collect-english.png')})
+  await win.waitForSelector('#tangu-splash',{state:'hidden',timeout:30000});await win.waitForTimeout(300);await win.screenshot({path:path.join(OUT,'collect-english.png')})
   fs.writeFileSync(path.join(OUT,'report.json'),JSON.stringify({checks,home,vault},null,2))
   console.log(JSON.stringify({passed:checks.length,home,output:OUT}))
  }catch(e){if(win){await win.screenshot({path:path.join(OUT,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(OUT,'failure.txt'),await win.locator('body').innerText().catch(()=>''))}throw e}
