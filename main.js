@@ -816,9 +816,13 @@ function upgradeStorage() {
     // has since deleted every entry. Do not import the retained root backup again.
     const previousRaw=await ctx.app.readFile('.forsion/plugin-migrations/bluebird-legacy-root-v1.json');check()
     const previous=previousRaw ? JSON.parse(previousRaw):null
-    if(previousRaw&&(!previous||previous.version!==1||typeof previous.complete!=='boolean'||previous.target!=='Plugins/青鸟收藏夹'))throw Error(t('indexInvalid'))
-    const priorComplete=previous?.version===1 && previous.complete===true && previous.target==='Plugins/青鸟收藏夹'
-    const sources=priorComplete ? [previous.target]:candidates,found=[]
+    if(previousRaw&&(!previous||previous.version!==1||typeof previous.complete!=='boolean'||!['青鸟收藏夹','Bluebird','videos'].includes(previous.source)||previous.target!=='Plugins/青鸟收藏夹'))throw Error(t('indexInvalid'))
+    let priorComplete=previous?.complete===true
+    if(previous&&!priorComplete){
+      const reconciled=await ctx.app.migrateWorkFolder({id:'legacy-root-v1',expectedRoot:vault,source:previous.source,target:previous.target});check()
+      priorComplete=reconciled.status==='complete'
+    }
+    const sources=previous ? [priorComplete ? previous.target:previous.source]:candidates,found=[]
     for(const source of sources){const index=await readIndexAt(source,true);check();if(priorComplete&&!index)throw Error(t('indexInvalid'));if(index&&(priorComplete||index.items.length||index.folders.length))found.push({source,index})}
     if(!found.length)return
     if(found.length!==1)throw Error(t('migrationConflict'))
@@ -838,7 +842,7 @@ function upgradeStorage() {
       const notePath=remap(entry.notePath)
       const media=archivedMediaName(entry.summaryMarkdown)
       if(media)requiredFiles.push(`${ASSETS_SUBDIR}/${media}`)
-      const noteRelative=entry.notePath.slice(source.length+1),nextNote=scopedMediaRefs(note,target,source)
+      const noteRelative=entry.notePath.slice(source.length+1),nextNote=scopedMediaRefs(note,target,source,false)
       if(nextNote!==note&&!noteEdits.has(noteRelative)){edits.push({path:noteRelative,before:note,after:nextNote});noteEdits.add(noteRelative)}
       if(item.notePath&&item.notePath!==entry.notePath)throw Error(t('indexInvalid'))
       edits.push({path,before:raw,after:JSON.stringify({...entry,notePath})});items.push({...item,notePath})
@@ -995,7 +999,7 @@ function parseTimeReference(href) {
   if (p.getAll('bluebird').length !== 1 || p.getAll('t').length !== 1 || !validEntryId(id) || at == null) return null
   return { entryId: id, at }
 }
-function scopedMediaRefs(text,target,source='') {
+function scopedMediaRefs(text,target,source='',scopeBare=true) {
   let fence=null
   return String(text||'').split('\n').map(line=>{
     const marker=/^\s*(`{3,}|~{3,})/.exec(line)?.[1]
@@ -1004,7 +1008,7 @@ function scopedMediaRefs(text,target,source='') {
     return line.replace(/(!?\[\[)([^\]|#]+)([^\]]*\]\])/g,(all,open,ref,tail)=>{
       let next=ref
       if(source&&ref.startsWith(source+'/'))next=target+ref.slice(source.length)
-      else if(/\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v)$/i.test(ref)&&(!ref.includes('/')||ref.startsWith('assets/')))next=`${target}/${ASSETS_SUBDIR}/${ref.replace(/^assets\//,'')}`
+      else if(scopeBare&&/\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v)$/i.test(ref)&&(!ref.includes('/')||ref.startsWith('assets/')))next=`${target}/${ASSETS_SUBDIR}/${ref.replace(/^assets\//,'')}`
       return open+next+tail
     })
   }).join('\n')

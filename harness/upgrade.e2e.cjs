@@ -8,6 +8,11 @@ const {startStubEngine}=require(DESK+'/scripts/lib/stub-engine.cjs')
 const {skipOnboarding}=require(DESK+'/scripts/lib/skip-onboarding.cjs')
 fs.mkdirSync(OUT,{recursive:true})
 const result='# 学习资料 / Study material\n\n## 目标 / Objective\n理解主动回忆。 / Understand active recall.\n\n```json bluebird\n'+JSON.stringify({meta:{title:'学习资料',platform:'bilibili',videoId:'BV1G4Jy6wEok',videoUrl:'https://www.bilibili.com/video/BV1G4Jy6wEok/'},segments:[{start:1,end:4,text:'Active recall'}],chapters:[],tags:[]})+'\n```'
+function priorJournal(vault,source,target,indexPath){
+ const files=[],crypto=require('node:crypto')
+ const walk=rel=>{for(const entry of fs.readdirSync(path.join(vault,target,rel),{withFileTypes:true})){const p=rel ? rel+'/'+entry.name:entry.name;if(entry.isDirectory())walk(p);else if(p!==indexPath)files.push({path:p,hash:crypto.createHash('sha256').update(fs.readFileSync(path.join(vault,target,p))).digest('hex')})}}
+ walk('');return {version:1,complete:process.env.PLUGIN_PRIOR_JOURNAL!=='interrupted',source,target,index:{path:indexPath,before:null,after:fs.readFileSync(path.join(vault,target,indexPath),'utf8')},files}
+}
 async function main(){
  const home=fs.mkdtempSync(path.join(os.tmpdir(),'bluebird-upgrade-')),vault=path.join(home,'Vault'),userData=path.join(home,'userdata')
  const legacy=process.env.PLUGIN_LEGACY_NESTED ? 'Plugins/青鸟收藏夹':'青鸟收藏夹'
@@ -17,10 +22,10 @@ async function main(){
  fs.writeFileSync(path.join(vault,legacy,'历史笔记.md'),'# 历史笔记\n\nUser content must stay unchanged.\n\n![[clip.wav]]')
  const wav=Buffer.alloc(32044);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(16000,24);wav.writeUInt32LE(32000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(32000,40)
  fs.mkdirSync(path.join(vault,legacy,'assets'));fs.writeFileSync(path.join(vault,legacy,'assets','clip.wav'),wav)
- if(process.env.PLUGIN_PRIOR_COMPLETE){
+ if(process.env.PLUGIN_PRIOR_JOURNAL){
   assert.equal(legacy,'Plugins/青鸟收藏夹');fs.cpSync(path.join(vault,legacy),path.join(vault,'青鸟收藏夹'),{recursive:true})
   const sidecar=path.join(vault,'青鸟收藏夹/.bluebird/old-one.json'),entry=JSON.parse(fs.readFileSync(sidecar,'utf8'));entry.notePath='青鸟收藏夹/历史笔记.md';fs.writeFileSync(sidecar,JSON.stringify(entry))
-  fs.mkdirSync(path.join(vault,'.forsion/plugin-migrations'),{recursive:true});fs.writeFileSync(path.join(vault,'.forsion/plugin-migrations/bluebird-legacy-root-v1.json'),JSON.stringify({version:1,complete:true,source:'青鸟收藏夹',target:legacy}))
+  fs.mkdirSync(path.join(vault,'.forsion/plugin-migrations'),{recursive:true});fs.writeFileSync(path.join(vault,'.forsion/plugin-migrations/bluebird-legacy-root-v1.json'),JSON.stringify(priorJournal(vault,'青鸟收藏夹',legacy,'.bluebird-index.json')))
  }
  const pdir=path.join(home,'plugins','bluebird');fs.mkdirSync(pdir,{recursive:true})
  for(const f of ['main.js','manifest.json','spaces','agents','skills','icon.png'])fs.cpSync(path.join(ROOT,f),path.join(pdir,f),{recursive:true})

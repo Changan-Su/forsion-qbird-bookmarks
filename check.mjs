@@ -805,9 +805,10 @@ A.equal(T.t('queueTitle'), '分析队列')
  VAULT.root='/migration-fixture';_ls.delete('plugin.bluebird.workFolder');ctx.app.workFolder=()=> 'Plugins/bluebird'
  V.set('青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[{id:'legacy-entry',notePath:'青鸟收藏夹/note.md'}]}))
  V.set('青鸟收藏夹/.bluebird/legacy-entry.json',JSON.stringify({id:'legacy-entry',notePath:'青鸟收藏夹/note.md',summaryMarkdown:'# Original\n![[clip.m4a]]'}));V.set('青鸟收藏夹/note.md','# User edits\n![[clip.m4a]]')
- let plan,done=false,calls=0
+ let plan,done=false,calls=0,predecessorStatus='complete'
  ctx.app.migrateWorkFolder=async request=>{
   calls++
+  if(request.id==='legacy-root-v1')return {status:predecessorStatus}
   if(!request.plan)return {status:done?'complete':'needed'}
   plan=request;for(const edit of request.plan.edits)V.set(request.target+'/'+edit.path,edit.after)
   V.set(request.target+'/note.md',V.get(request.source+'/note.md'));done=true;return {status:'complete'}
@@ -815,7 +816,7 @@ A.equal(T.t('queueTitle'), '分析队列')
  try{
   await T.upgradeStorage();A.equal(plan.source,'青鸟收藏夹');A.equal(plan.plan.index.before,null)
   A.equal(JSON.parse(V.get('Plugins/bluebird/.bluebird/legacy-entry.json')).notePath,'Plugins/bluebird/note.md')
-  A.equal(V.get('青鸟收藏夹/note.md'),'# User edits\n![[clip.m4a]]');A.ok(plan.plan.edits.find(e=>e.path==='note.md').after.includes('![[Plugins/bluebird/assets/clip.m4a]]'));A.equal(_ls.get('plugin.bluebird.workFolder'),undefined)
+  A.equal(V.get('青鸟收藏夹/note.md'),'# User edits\n![[clip.m4a]]');A.ok(!plan.plan.edits.some(e=>e.path==='note.md'),'the host resolves bare media before copying, without assuming assets/');A.equal(_ls.get('plugin.bluebird.workFolder'),undefined)
   V.delete('Plugins/bluebird/.bluebird/legacy-entry.json');V.set('videos/.bluebird/legacy-entry.json',JSON.stringify({id:'legacy-entry',notePath:'videos/deleted.md'}));A.equal(await T.loadEntry('legacy-entry'),null)
   const n=calls;await T.upgradeStorage();A.equal(calls,n);A.deepEqual(await T.legacyData(),[])
   VAULT.root='cloud://cloud-fixture';await T.upgradeStorage();A.equal(calls,n)
@@ -828,6 +829,9 @@ A.equal(T.t('queueTitle'), '分析队列')
   await A.rejects(T.upgradeStorage());A.equal(plan.source,'Plugins/青鸟收藏夹')
   V.set('.forsion/plugin-migrations/bluebird-legacy-root-v1.json',JSON.stringify({version:1,complete:true,target:'Plugins/青鸟收藏夹',source:'青鸟收藏夹'}))
   VAULT.root='/prior-complete-fixture';done=false;await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹')
+  VAULT.root='/prior-interrupted-after-index';done=false;V.delete('Plugins/bluebird/.bluebird-index.json');V.set('.forsion/plugin-migrations/bluebird-legacy-root-v1.json',JSON.stringify({version:1,complete:false,target:'Plugins/青鸟收藏夹',source:'青鸟收藏夹'}));await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹')
+  VAULT.root='/prior-interrupted-before-index';done=false;predecessorStatus='needed';V.delete('Plugins/bluebird/.bluebird-index.json');V.set('青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[{id:'legacy-entry',notePath:'青鸟收藏夹/note.md'}]}));await T.upgradeStorage();A.equal(plan.source,'青鸟收藏夹')
+  V.set('.forsion/plugin-migrations/bluebird-legacy-root-v1.json',JSON.stringify({version:1,complete:true,target:'Plugins/青鸟收藏夹',source:'青鸟收藏夹'}))
   VAULT.root='/prior-deleted-fixture';done=false;V.delete('Plugins/bluebird/.bluebird-index.json');V.set('Plugins/青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[]}))
   await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹');A.deepEqual(JSON.parse(plan.plan.index.after).items,[])
   VAULT.root='/invalid-prior-marker';done=false;V.delete('Plugins/bluebird/.bluebird-index.json');V.set('.forsion/plugin-migrations/bluebird-legacy-root-v1.json','{}');await A.rejects(T.upgradeStorage());
