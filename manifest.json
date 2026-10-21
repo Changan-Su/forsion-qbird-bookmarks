@@ -26,7 +26,7 @@
       },
       {
         "title": "开用",
-        "description": "新建收藏时粘贴链接，并填写可选的整理要求。仅收藏会保存链接与要求草稿；收藏并整理会固定本次要求并启动任务。队列和详情均可查看、导出日志，失败或取消也保留已保存的记录。默认资料位置为 Plugins/青鸟收藏夹，可在工作文件夹设置中调整；发现旧资料时先确认使用旧目录。"
+        "description": "新建收藏时粘贴链接，并填写可选的整理要求。仅收藏会保存链接与要求草稿；收藏并整理会固定本次要求并启动任务。队列和详情均可查看、导出日志，失败或取消也保留已保存的记录。默认资料位置为 Plugins/bluebird，可在工作文件夹设置中调整；桌面本机智库升级时自动迁移已知旧资料，原目录保留为备份。"
       }
     ],
     "en": {
@@ -42,7 +42,7 @@
         },
         {
           "title": "Getting started",
-          "description": "Paste a link and optionally describe the result you need. Save only keeps the link and instructions; Save and organize snapshots the instructions and starts a task. View and export saved logs even after failure or cancellation. The default work folder is Plugins/青鸟收藏夹; previous data is detected and reconnected only after confirmation."
+          "description": "Paste a link and optionally describe the result you need. Save only keeps the link and instructions; Save and organize snapshots the instructions and starts a task. View and export saved logs even after failure or cancellation. The default work folder is Plugins/bluebird; known previous-version data is automatically migrated on supported local desktop vaults, retaining the original folder as a backup."
         }
       ]
     },

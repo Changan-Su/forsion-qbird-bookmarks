@@ -802,7 +802,7 @@ A.equal(T.t('queueTitle'), '分析队列')
 // Schema migration plans use the host transaction and preserve manual folders.
 {
  const oldRoot=VAULT.root,oldFolder=ctx.app.workFolder,oldMigration=ctx.app.migrateWorkFolder,oldCustom=_ls.get('plugin.bluebird.workFolder')
- VAULT.root='/migration-fixture';_ls.delete('plugin.bluebird.workFolder');ctx.app.workFolder=()=> 'Plugins/青鸟收藏夹'
+ VAULT.root='/migration-fixture';_ls.delete('plugin.bluebird.workFolder');ctx.app.workFolder=()=> 'Plugins/bluebird'
  V.set('青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[{id:'legacy-entry',notePath:'青鸟收藏夹/note.md'}]}))
  V.set('青鸟收藏夹/.bluebird/legacy-entry.json',JSON.stringify({id:'legacy-entry',notePath:'青鸟收藏夹/note.md',summaryMarkdown:'# Original\n![[clip.m4a]]'}));V.set('青鸟收藏夹/note.md','# User edits\n![[clip.m4a]]')
  let plan,done=false,calls=0
@@ -814,13 +814,27 @@ A.equal(T.t('queueTitle'), '分析队列')
  }
  try{
   await T.upgradeStorage();A.equal(plan.source,'青鸟收藏夹');A.equal(plan.plan.index.before,null)
-  A.equal(JSON.parse(V.get('Plugins/青鸟收藏夹/.bluebird/legacy-entry.json')).notePath,'Plugins/青鸟收藏夹/note.md')
-  A.equal(V.get('青鸟收藏夹/note.md'),'# User edits\n![[clip.m4a]]');A.ok(plan.plan.edits.find(e=>e.path==='note.md').after.includes('![[Plugins/青鸟收藏夹/assets/clip.m4a]]'));A.equal(_ls.get('plugin.bluebird.workFolder'),undefined)
-  V.delete('Plugins/青鸟收藏夹/.bluebird/legacy-entry.json');V.set('videos/.bluebird/legacy-entry.json',JSON.stringify({id:'legacy-entry',notePath:'videos/deleted.md'}));A.equal(await T.loadEntry('legacy-entry'),null)
+  A.equal(JSON.parse(V.get('Plugins/bluebird/.bluebird/legacy-entry.json')).notePath,'Plugins/bluebird/note.md')
+  A.equal(V.get('青鸟收藏夹/note.md'),'# User edits\n![[clip.m4a]]');A.ok(plan.plan.edits.find(e=>e.path==='note.md').after.includes('![[Plugins/bluebird/assets/clip.m4a]]'));A.equal(_ls.get('plugin.bluebird.workFolder'),undefined)
+  V.delete('Plugins/bluebird/.bluebird/legacy-entry.json');V.set('videos/.bluebird/legacy-entry.json',JSON.stringify({id:'legacy-entry',notePath:'videos/deleted.md'}));A.equal(await T.loadEntry('legacy-entry'),null)
   const n=calls;await T.upgradeStorage();A.equal(calls,n);A.deepEqual(await T.legacyData(),[])
   VAULT.root='cloud://cloud-fixture';await T.upgradeStorage();A.equal(calls,n)
+  VAULT.root='/nested-migration-fixture';done=false
+  V.delete('Plugins/bluebird/.bluebird-index.json');V.delete('青鸟收藏夹/.bluebird-index.json');V.delete('videos/.bluebird-index.json')
+  V.set('Plugins/青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[{id:'nested-entry',notePath:'Plugins/青鸟收藏夹/note.md'}]}))
+  V.set('Plugins/青鸟收藏夹/.bluebird/nested-entry.json',JSON.stringify({id:'nested-entry',notePath:'Plugins/青鸟收藏夹/note.md',summaryMarkdown:'# Original\n![[clip.m4a]]'}));V.set('Plugins/青鸟收藏夹/note.md','# User edits\n![[clip.m4a]]')
+  await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹');A.equal(JSON.parse(V.get('Plugins/bluebird/.bluebird/nested-entry.json')).notePath,'Plugins/bluebird/note.md')
+  V.set('青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[{id:'other'}]}));VAULT.root='/multiple-source-fixture';V.delete('Plugins/bluebird/.bluebird-index.json');done=false
+  await A.rejects(T.upgradeStorage());A.equal(plan.source,'Plugins/青鸟收藏夹')
+  V.set('.forsion/plugin-migrations/bluebird-legacy-root-v1.json',JSON.stringify({version:1,complete:true,target:'Plugins/青鸟收藏夹',source:'青鸟收藏夹'}))
+  VAULT.root='/prior-complete-fixture';done=false;await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹')
+  VAULT.root='/prior-deleted-fixture';done=false;V.delete('Plugins/bluebird/.bluebird-index.json');V.set('Plugins/青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[]}))
+  await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹');A.deepEqual(JSON.parse(plan.plan.index.after).items,[])
+  VAULT.root='/old-api-fixture';ctx.app.workFolder=()=> 'Plugins/青鸟收藏夹';const beforeOld=calls;await T.upgradeStorage();A.equal(calls,beforeOld);ctx.app.workFolder=()=> 'Plugins/bluebird'
+
+
   VAULT.root='/retry-fixture';let retryCalls=0;ctx.app.migrateWorkFolder=async()=>{if(++retryCalls===1)throw Error('temporary copy failure');return {status:'complete'}};await A.rejects(T.upgradeStorage(),/temporary/);await T.upgradeStorage();A.equal(retryCalls,2)
-  VAULT.root='/custom-folder-fixture';_ls.set('plugin.bluebird.workFolder','My bookmarks');await T.upgradeStorage();A.equal(calls,n)
+  VAULT.root='/custom-folder-fixture';_ls.set('plugin.bluebird.workFolder','My bookmarks');const beforeCustom=calls;await T.upgradeStorage();A.equal(calls,beforeCustom)
  }finally{VAULT.root=oldRoot;ctx.app.workFolder=oldFolder;ctx.app.migrateWorkFolder=oldMigration;if(oldCustom===undefined)_ls.delete('plugin.bluebird.workFolder');else _ls.set('plugin.bluebird.workFolder',oldCustom)}
 }
 

@@ -349,7 +349,7 @@ function registerSettings() {
   ctx.registerSetting({ key: 'autoSave', label: t('setAutoLabel'), type: 'boolean', default: false, description: t('setAutoDesc') })
 }
 registerSettings()
-// 存储文件夹改用宿主标准「工作文件夹」设置(1.3.0 起,每个插件自动就有,默认=插件名「青鸟收藏夹」)。
+// 存储文件夹改用宿主标准「工作文件夹」设置(1.3.0 起,每个插件自动就有,默认=英文插件 ID「青鸟收藏夹」)。
 // 1.2.x 自定义过 saveFolder 的一次性迁移成 workFolder,此后单一真源;旧键删除。
 try {
   const o = localStorage.getItem(`plugin.${PLUGIN_ID}.saveFolder`)
@@ -777,9 +777,9 @@ async function runAgent(cfg, sessionId, message, onTick, signal, onStage, task, 
 }
 
 // ── 收藏夹持久化:vault 索引 + 每条数据 sidecar(纯 ctx.app 文件读写,无外部后端) ──
-// 工作文件夹 = 宿主标准约定(插件设置「工作文件夹」,默认=插件名);老宿主没有该 API 时退回 1.2.x 的 videos。
+// 工作文件夹 = 宿主标准约定(插件设置「工作文件夹」,默认=英文插件 ID);老宿主没有该 API 时退回 1.2.x 的 videos。
 const LEGACY_ROOT = 'videos'
-const folderRoot = () => (ctx.app.workFolder ? ctx.app.workFolder() : LEGACY_ROOT)
+const folderRoot = () => (ctx.app.workFolder ? ctx.app.workFolder(ctx.app.migrateWorkFolder ? {preferId:true}:undefined) : LEGACY_ROOT)
 const indexPath = () => `${folderRoot()}/.bluebird-index.json`
 const dataPath = (id) => `${folderRoot()}/.bluebird/${id}.json`
 async function readIndexAt(root, strict = false) {
@@ -798,21 +798,27 @@ async function readIndex() {
 }
 // One migration per vault. Kept separate from runtime tasks so first list/read/save
 // waits for it, including after switching libraries. The host owns copies and journal.
+const LEGACY_FOLDERS = ['Plugins/青鸟收藏夹','青鸟收藏夹','Bluebird','videos']
 const storageUpgrades = new Map(), storageMigrated = new Set()
 function upgradeStorage() {
   const vault=ctx.app.vaultRoot?.(),target=folderRoot(),scope=`${vault}\n${target}`
-  if(!vault || String(vault).includes('://') || !ctx.app.migrateWorkFolder || localStorage.getItem(`plugin.${PLUGIN_ID}.workFolder`) || !target.startsWith('Plugins/'))return Promise.resolve()
+  if(!vault || String(vault).includes('://') || !ctx.app.migrateWorkFolder || localStorage.getItem(`plugin.${PLUGIN_ID}.workFolder`) || (!target.startsWith('Plugins/')||LEGACY_FOLDERS.includes(target)))return Promise.resolve()
   if(storageUpgrades.has(scope))return storageUpgrades.get(scope)
   const work=(async()=>{
     const check=()=>{if(vault!==ctx.app.vaultRoot?.()||target!==folderRoot())throw Error(t('vaultChanged'))}
-    const candidates=['青鸟收藏夹','Bluebird','videos'],id='legacy-root-v1'
+    const candidates=LEGACY_FOLDERS.filter(folder=>folder!==target),id='english-id-v1'
     if((await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source:candidates[0],target})).status==='complete'){storageMigrated.add(scope);return}
     check()
     const before=await ctx.app.readFile(`${target}/.bluebird-index.json`);check()
     const current=await readIndexAt(target,true);check()
     if(current?.items.length || current?.folders.length)return // Preserve an already-used collection; recovery compares both.
-    const found=[]
-    for(const source of candidates){const index=await readIndexAt(source,true);check();if(index?.items.length)found.push({source,index})}
+    // A completed prior migration makes its target authoritative, even when the user
+    // has since deleted every entry. Do not import the retained root backup again.
+    const previousRaw=await ctx.app.readFile('.forsion/plugin-migrations/bluebird-legacy-root-v1.json');check()
+    const previous=previousRaw ? JSON.parse(previousRaw):null
+    const priorComplete=previous?.version===1 && previous.complete===true && previous.target==='Plugins/青鸟收藏夹'
+    const sources=priorComplete ? [previous.target]:candidates,found=[]
+    for(const source of sources){const index=await readIndexAt(source,true);check();if(priorComplete&&!index)throw Error(t('indexInvalid'));if(index&&(priorComplete||index.items.length||index.folders.length))found.push({source,index})}
     if(!found.length)return
     if(found.length!==1)throw Error(t('migrationConflict'))
     const {source,index}=found[0]
@@ -853,7 +859,7 @@ async function legacyData() {
   let currentCount=0
   try{currentCount=(await readIndexAt(current,true))?.items.length || 0}
   catch{return [{folder:current,error:true}]}
-  for(const folder of ['青鸟收藏夹','Bluebird','videos']){
+  for(const folder of LEGACY_FOLDERS){
     if(folder===current)continue
     try{const index=await readIndexAt(folder,true);if(index?.items.length)found.push({folder,count:index.items.length,current,currentCount})}
     catch{found.push({folder,error:true})}
@@ -861,7 +867,7 @@ async function legacyData() {
   return vault===taskScope()&&current===folderRoot() ? found:[]
 }
 function useLegacyFolder(folder) {
-  if (!['青鸟收藏夹','Bluebird','videos'].includes(folder)) return
+  if (!LEGACY_FOLDERS.includes(folder)) return
   localStorage.setItem(`plugin.${PLUGIN_ID}.workFolder`,folder)
   bus.emit({type:'saved'}); bus.emit({type:'folder-changed'})
 }
