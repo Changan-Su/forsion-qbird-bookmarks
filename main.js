@@ -989,12 +989,18 @@ function parseTimeReference(href) {
   return { entryId: id, at }
 }
 function scopedMediaRefs(text,target,source='') {
-  return String(text||'').replace(/(!?\[\[)([^\]|#]+)([^\]]*\]\])/g,(all,open,ref,tail)=>{
-    let next=ref
-    if(source&&ref.startsWith(source+'/'))next=target+ref.slice(source.length)
-    else if(/\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v)$/i.test(ref)&&(!ref.includes('/')||ref.startsWith('assets/')))next=`${target}/${ASSETS_SUBDIR}/${ref.replace(/^assets\//,'')}`
-    return open+next+tail
-  })
+  let fence=null
+  return String(text||'').split('\n').map(line=>{
+    const marker=/^\s*(`{3,}|~{3,})/.exec(line)?.[1]
+    if(marker){if(!fence)fence=marker;else if(marker[0]===fence[0]&&marker.length>=fence.length)fence=null;return line}
+    if(fence||line.includes('`'))return line
+    return line.replace(/(!?\[\[)([^\]|#]+)([^\]]*\]\])/g,(all,open,ref,tail)=>{
+      let next=ref
+      if(source&&ref.startsWith(source+'/'))next=target+ref.slice(source.length)
+      else if(/\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v)$/i.test(ref)&&(!ref.includes('/')||ref.startsWith('assets/')))next=`${target}/${ASSETS_SUBDIR}/${ref.replace(/^assets\//,'')}`
+      return open+next+tail
+    })
+  }).join('\n')
 }
 function archivedMediaName(summary) {
   const name = (/!\[\[([^\]|#]+\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v))\]\]/i.exec(summary || '') || [])[1]
