@@ -816,6 +816,7 @@ function upgradeStorage() {
     // has since deleted every entry. Do not import the retained root backup again.
     const previousRaw=await ctx.app.readFile('.forsion/plugin-migrations/bluebird-legacy-root-v1.json');check()
     const previous=previousRaw ? JSON.parse(previousRaw):null
+    if(previousRaw&&(!previous||previous.version!==1||typeof previous.complete!=='boolean'||previous.target!=='Plugins/青鸟收藏夹'))throw Error(t('indexInvalid'))
     const priorComplete=previous?.version===1 && previous.complete===true && previous.target==='Plugins/青鸟收藏夹'
     const sources=priorComplete ? [previous.target]:candidates,found=[]
     for(const source of sources){const index=await readIndexAt(source,true);check();if(priorComplete&&!index)throw Error(t('indexInvalid'));if(index&&(priorComplete||index.items.length||index.folders.length))found.push({source,index})}

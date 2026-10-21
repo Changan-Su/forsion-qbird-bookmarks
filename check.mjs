@@ -830,6 +830,7 @@ A.equal(T.t('queueTitle'), '分析队列')
   VAULT.root='/prior-complete-fixture';done=false;await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹')
   VAULT.root='/prior-deleted-fixture';done=false;V.delete('Plugins/bluebird/.bluebird-index.json');V.set('Plugins/青鸟收藏夹/.bluebird-index.json',JSON.stringify({folders:[],items:[]}))
   await T.upgradeStorage();A.equal(plan.source,'Plugins/青鸟收藏夹');A.deepEqual(JSON.parse(plan.plan.index.after).items,[])
+  VAULT.root='/invalid-prior-marker';done=false;V.delete('Plugins/bluebird/.bluebird-index.json');V.set('.forsion/plugin-migrations/bluebird-legacy-root-v1.json','{}');await A.rejects(T.upgradeStorage());
   VAULT.root='/old-api-fixture';ctx.app.workFolder=()=> 'Plugins/青鸟收藏夹';const beforeOld=calls;await T.upgradeStorage();A.equal(calls,beforeOld);ctx.app.workFolder=()=> 'Plugins/bluebird'
 
 
