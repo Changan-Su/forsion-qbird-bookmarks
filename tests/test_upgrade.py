@@ -23,7 +23,7 @@ class UpgradeChecks(unittest.TestCase):
             self.assertEqual(plan["destination"], str(installed.resolve()))
             self.assertEqual((installed / "main.js").read_text(), "old bundle")
             result = upgrade.install_bundle(SOURCE, home)
-            self.assertEqual(json.loads((installed / "manifest.json").read_text())["version"], "2.3.0")
+            self.assertEqual(json.loads((installed / "manifest.json").read_text())["version"], "2.3.1")
             self.assertEqual((Path(result["backup"]) / "main.js").read_text(), "old bundle")
             self.assertFalse((home / "plugins/bluebird").exists())
 

@@ -140,7 +140,14 @@ def extract_subtitles(info, work_dir, lang_priority, headers=None):
         chosen = next((f for f in formats if f.get("ext") in ("json3", "srv3")), None) \
             or next((f for f in formats if f.get("ext") == "vtt"), None) \
             or (formats[0] if formats else None)
-        if not chosen or "url" not in chosen:
+        if not chosen:
+            continue
+        if isinstance(chosen.get("data"), str):
+            text = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", chosen["data"])
+            segs = parse_vtt_text(text)
+            if segs:
+                return segs, chosen_lang
+        if "url" not in chosen:
             continue
         ext = chosen.get("ext", "vtt")
         sub_path = work_dir / f"subs.{ext}"
@@ -152,6 +159,9 @@ def extract_subtitles(info, work_dir, lang_priority, headers=None):
                 segs = parse_json3_subtitles(sub_path)
             elif ext in ("srv3", "srv2", "srv1"):
                 segs = parse_srv_subtitles(sub_path)
+            elif ext == "srt":
+                text = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", sub_path.read_text(encoding="utf-8"))
+                segs = parse_vtt_text(text)
             else:
                 segs = parse_vtt_subtitles(sub_path)
             if segs:
@@ -191,7 +201,24 @@ def download_audio(url, work_dir, headers, info=None):
     }
     with YoutubeDL(opts) as ydl:
         if info:
-            ydl.process_ie_result(dict(info), download=True)
+            selected = ydl.process_ie_result(dict(info), download=False)
+            try:
+                ydl.process_ie_result(dict(info), download=True)
+            except Exception:
+                # Only try mirrors explicitly returned for the selected format.
+                # Never synthesize a CDN URL or retry a platform access denial.
+                original = next((f for f in info.get("formats", []) if f.get("url") == selected.get("url")), {})
+                backups = list(dict.fromkeys(original.get("bluebird_backup_urls") or []))[:2]
+                if not backups:
+                    raise
+                for index, backup in enumerate(backups):
+                    retry = {**info, "formats": [{**original, "url": backup, "bluebird_backup_urls": []}]}
+                    try:
+                        ydl.process_ie_result(retry, download=True)
+                        break
+                    except Exception:
+                        if index == len(backups) - 1:
+                            raise
         else:
             ydl.extract_info(url, download=True)
     audio = work_dir / "audio.wav"
@@ -328,7 +355,11 @@ class RetrievalError(RuntimeError):
 
 
 def request_headers(url):
-    headers = {"User-Agent": os.environ.get("BLUEBIRD_UA", "").strip() or DEFAULT_UA}
+    try:
+        from yt_dlp.utils import std_headers
+    except ImportError:
+        std_headers = {}
+    headers = {"User-Agent": os.environ.get("BLUEBIRD_UA", "").strip() or std_headers.get("User-Agent", DEFAULT_UA)}
     host = (urllib.parse.urlparse(url).hostname or "").lower()
     if host == "bilibili.com" or host.endswith(".bilibili.com") or host == "b23.tv":
         headers["Referer"] = "https://www.bilibili.com/"
@@ -380,6 +411,57 @@ def failure_result(err):
             "diagnostics": diagnostics(), "nextActions": ["Open the source in your browser", "Import local media or subtitles", "Retry after the source is accessible"]}
 
 
+def bilibili_web_info(url, ydl, headers):
+    """Connect SSR-less web pages to the player's signed metadata and media APIs.
+
+    Signing and format parsing stay in yt-dlp. Platform denials remain failures.
+    """
+    from yt_dlp.extractor.bilibili import BiliBiliIE
+    match = re.fullmatch(r"/video/(BV[0-9A-Za-z]{10})/?", urllib.parse.urlparse(url).path)
+    if not match:
+        raise ValueError("Unsupported Bilibili video URL")
+    bvid = match.group(1)
+    ie = BiliBiliIE(ydl)
+    api_headers = {**headers, "Origin": "https://www.bilibili.com"}
+    detail = ie._download_json(
+        "https://api.bilibili.com/x/web-interface/wbi/view/detail", bvid,
+        query=ie._sign_wbi({"bvid": bvid, "platform": "web"}, bvid), headers=api_headers)
+    if detail.get("code") != 0:
+        raise RuntimeError("Bilibili metadata denied: %s %s" % (detail.get("code"), detail.get("message", "")))
+    view = (detail.get("data") or {}).get("View") or {}
+    if view.get("bvid") != bvid or not view.get("title") or view.get("redirect_url"):
+        raise RuntimeError("Bilibili returned unsupported or mismatched video metadata")
+    part = int(urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("p", ["1"])[-1])
+    page = next((p for p in view.get("pages", []) if p.get("page") == part), None)
+    if not page or not page.get("cid"):
+        raise RuntimeError("Bilibili video part is unavailable")
+    play = ie._download_playinfo(bvid, page["cid"], headers=api_headers)
+    parser = getattr(ie, "extract_formats", None) or getattr(ie, "_extract_formats", None)
+    formats = parser(play) if parser else []
+    # yt-dlp drops DASH backupUrl. These are alternate URLs supplied by the
+    # platform for the same media; retain them for ordinary CDN failover.
+    audio_streams = (play.get("dash") or {}).get("audio") or []
+    for fmt in formats:
+        stream = next((a for a in audio_streams if (a.get("baseUrl") or a.get("base_url")) == fmt.get("url")), {})
+        fmt["bluebird_backup_urls"] = stream.get("backupUrl") or stream.get("backup_url") or []
+    duration = float(play.get("timelength") or 0) / 1000
+    expected = float(page.get("duration") or view.get("duration") or 0)
+    if not formats or not duration or duration + 2 < expected:
+        raise RuntimeError("Bilibili full media is unavailable (login, preview or restricted content)")
+    try:
+        subtitles = ie._get_subtitles(bvid, page["cid"]) or {}
+    except Exception as exc:
+        print("Bilibili subtitles unavailable; retrieving audio: %s" % type(exc).__name__, file=sys.stderr)
+        subtitles = {}
+    return {
+        "id": bvid if len(view.get("pages", [])) == 1 else f"{bvid}_p{part}", "title": view["title"] if part == 1 else page.get("part") or view["title"],
+        "duration": duration, "uploader": (view.get("owner") or {}).get("name", ""),
+        "description": view.get("desc", ""), "thumbnail": view.get("pic", ""),
+        "webpage_url": url, "formats": formats, "subtitles": subtitles,
+        "http_headers": api_headers, "extractor": "BiliBili", "extractor_key": "BiliBili",
+    }
+
+
 def run(url, save_to=None):
     try:
         from yt_dlp import YoutubeDL
@@ -398,7 +480,14 @@ def run(url, save_to=None):
     try:
         try:
             with YoutubeDL(probe_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except Exception as initial_error:
+                    host = (urllib.parse.urlparse(url).hostname or "").lower()
+                    if (host == "bilibili.com" or host.endswith(".bilibili.com")) and "unable to extract initial state" in str(initial_error).lower():
+                        info = bilibili_web_info(url, ydl, headers)
+                    else:
+                        raise
         except Exception as exc:
             # 图文帖没有视频流,yt-dlp 常在这一步就抛 —— 退成不解析流的元数据抽取
             host = urllib.parse.urlparse(url).hostname or ""
@@ -446,7 +535,9 @@ def run(url, save_to=None):
                 except Exception as exc:
                     print("音频存档失败(不影响转写):%s" % exc, file=sys.stderr)
 
-        keep = Path(tempfile.gettempdir()) / f"bluebird-asr-{safe_stem(meta.get('videoId')) or 'audio'}.wav"
+        keep_fd, keep_path = tempfile.mkstemp(prefix=f"bluebird-asr-{safe_stem(meta.get('videoId'))}-", suffix=".wav")
+        os.close(keep_fd)
+        keep = Path(keep_path)
         shutil.move(str(audio), str(keep))  # 必须搬出 work_dir —— finally 会把它整个删掉
         out = {"ok": True, "source": "needs_asr", "meta": meta, "audio_path": str(keep),
                "note": "无原生字幕;音频已转 16kHz 单声道 WAV,待宿主用 Forsion 语音识别转写"}

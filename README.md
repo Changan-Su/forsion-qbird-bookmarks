@@ -91,3 +91,14 @@ Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-r
 打开已保存的视频只读取本地记录；字幕上下文会等到用户明确提问时才交给模型。列表缓存按智库和工作文件夹隔离，丢弃切库前的迟到读取。
 
 **English:** Opening a saved video only reads existing data. Transcript context is sent with the user's explicit question, never as a background priming run. List caches are scoped to vault/work folder and reject late reads from a previous scope.
+
+
+### Upgrade migration / 升级迁移
+
+With a host exposing `ctx.app.migrateWorkFolder`, opening an older library automatically migrates its known legacy folder once to the default `Plugins/bluebird` before reading or saving records. The old folder remains a backup. Explicit work-folder settings are preserved. Conflicting indexes, missing media, corrupt records and multiple legacy data sets keep the original data and require recovery review. Older hosts retain the explicit previous-folder recovery flow; automatic migration requires the paired host update.
+
+支持迁移 API 的新版宿主会在读取或保存前自动迁移一次旧资料到 `Plugins/bluebird`；原目录保留为备份，不改用户手动设置的工作文件夹。遇到冲突、资料损坏或缺失时保留原文件并提示恢复；旧宿主继续提供手动接回入口。
+
+New default folders use the stable English plugin ID. Both the original vault-root folder and the previous Chinese `Plugins` folder are recognized; multiple populated sources require review. Use `PLUGIN_LEGACY_NESTED=1` with the Electron acceptance command to exercise the previous Chinese `Plugins` layout.
+
+新默认目录使用稳定的英文插件 ID；库根旧目录和上一版中文 `Plugins` 目录均可识别。存在多份非空旧资料时保留原件并提示核对。

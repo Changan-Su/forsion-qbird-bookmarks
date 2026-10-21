@@ -230,6 +230,9 @@ Object.assign(MSG.zh, {
   "indexInvalid": "收藏索引无法读取，已停止保存以保护现有资料。",
   "legacyFound": "发现旧资料：{count} 条收藏位于 {folder}。",
   "legacyCompare": "当前 {current} 有 {currentCount} 条收藏；旧目录 {folder} 有 {count} 条。",
+  "migrationDone": "历史收藏已迁移到 Plugins；旧目录保留为备份。",
+  "migrationConflict": "发现多份历史资料或新目录已有收藏，请先使用恢复入口检查。",
+  "migrationFailed": "自动迁移未完成，原资料已保留：{message}",
   "legacyReadError": "无法读取 {folder} 的收藏索引，请先检查资料。",
   "legacyUse": "继续使用旧目录",
   "legacyLater": "稍后处理",
@@ -284,6 +287,9 @@ Object.assign(MSG.en, {
   "indexInvalid": "The bookmark index could not be read. Saving has stopped to protect existing data.",
   "legacyFound": "Previous data found: {count} bookmarks in {folder}.",
   "legacyCompare": "{current} has {currentCount} bookmarks; the previous folder {folder} has {count}.",
+  "migrationDone": "Previous bookmarks migrated to Plugins. The original folder is retained as a backup.",
+  "migrationConflict": "Multiple data sets exist or the new folder already has bookmarks. Review the recovery options first.",
+  "migrationFailed": "Automatic migration could not finish. Original data is retained: {message}",
   "legacyReadError": "Could not read the bookmark index in {folder}. Check the data before recovery.",
   "legacyUse": "Use previous folder",
   "legacyLater": "Later",
@@ -343,7 +349,7 @@ function registerSettings() {
   ctx.registerSetting({ key: 'autoSave', label: t('setAutoLabel'), type: 'boolean', default: false, description: t('setAutoDesc') })
 }
 registerSettings()
-// 存储文件夹改用宿主标准「工作文件夹」设置(1.3.0 起,每个插件自动就有,默认=插件名「青鸟收藏夹」)。
+// 存储文件夹改用宿主标准「工作文件夹」设置(1.3.0 起,每个插件自动就有,默认=英文插件 ID「青鸟收藏夹」)。
 // 1.2.x 自定义过 saveFolder 的一次性迁移成 workFolder,此后单一真源;旧键删除。
 try {
   const o = localStorage.getItem(`plugin.${PLUGIN_ID}.saveFolder`)
@@ -771,9 +777,9 @@ async function runAgent(cfg, sessionId, message, onTick, signal, onStage, task, 
 }
 
 // ── 收藏夹持久化:vault 索引 + 每条数据 sidecar(纯 ctx.app 文件读写,无外部后端) ──
-// 工作文件夹 = 宿主标准约定(插件设置「工作文件夹」,默认=插件名);老宿主没有该 API 时退回 1.2.x 的 videos。
+// 工作文件夹 = 宿主标准约定(插件设置「工作文件夹」,默认=英文插件 ID);老宿主没有该 API 时退回 1.2.x 的 videos。
 const LEGACY_ROOT = 'videos'
-const folderRoot = () => (ctx.app.workFolder ? ctx.app.workFolder() : LEGACY_ROOT)
+const folderRoot = () => (ctx.app.workFolder ? ctx.app.workFolder(ctx.app.migrateWorkFolder ? {preferId:true}:undefined) : LEGACY_ROOT)
 const indexPath = () => `${folderRoot()}/.bluebird-index.json`
 const dataPath = (id) => `${folderRoot()}/.bluebird/${id}.json`
 async function readIndexAt(root, strict = false) {
@@ -786,15 +792,79 @@ async function readIndexAt(root, strict = false) {
   } catch(error) { if(strict)throw Error(t('indexInvalid'));return null }
 }
 async function readIndex() {
+  if(ctx.app.migrateWorkFolder)await upgradeStorage()
   const cur = await readIndexAt(folderRoot(),true)
   return cur || { folders: [], items: [] }
 }
+// One migration per vault. Kept separate from runtime tasks so first list/read/save
+// waits for it, including after switching libraries. The host owns copies and journal.
+const LEGACY_FOLDERS = ['Plugins/青鸟收藏夹','青鸟收藏夹','Bluebird','videos']
+const storageUpgrades = new Map(), storageMigrated = new Set()
+function upgradeStorage() {
+  const vault=ctx.app.vaultRoot?.(),target=folderRoot(),scope=`${vault}\n${target}`
+  if(!vault || String(vault).includes('://') || !ctx.app.migrateWorkFolder || localStorage.getItem(`plugin.${PLUGIN_ID}.workFolder`) || (!target.startsWith('Plugins/')||LEGACY_FOLDERS.includes(target)))return Promise.resolve()
+  if(storageUpgrades.has(scope))return storageUpgrades.get(scope)
+  const work=(async()=>{
+    const check=()=>{if(vault!==ctx.app.vaultRoot?.()||target!==folderRoot())throw Error(t('vaultChanged'))}
+    const candidates=LEGACY_FOLDERS.filter(folder=>folder!==target),id='english-id-v1'
+    if((await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source:candidates[0],target})).status==='complete'){storageMigrated.add(scope);return}
+    check()
+    const before=await ctx.app.readFile(`${target}/.bluebird-index.json`);check()
+    const current=await readIndexAt(target,true);check()
+    if(current?.items.length || current?.folders.length)return // Preserve an already-used collection; recovery compares both.
+    // A completed prior migration makes its target authoritative, even when the user
+    // has since deleted every entry. Do not import the retained root backup again.
+    const previousRaw=await ctx.app.readFile('.forsion/plugin-migrations/bluebird-legacy-root-v1.json');check()
+    const previous=previousRaw ? JSON.parse(previousRaw):null
+    if(previousRaw&&(!previous||previous.version!==1||typeof previous.complete!=='boolean'||!['青鸟收藏夹','Bluebird','videos'].includes(previous.source)||previous.target!=='Plugins/青鸟收藏夹'))throw Error(t('indexInvalid'))
+    let priorComplete=previous?.complete===true
+    if(previous&&!priorComplete){
+      const reconciled=await ctx.app.migrateWorkFolder({id:'legacy-root-v1',expectedRoot:vault,source:previous.source,target:previous.target});check()
+      priorComplete=reconciled.status==='complete'
+    }
+    const sources=previous ? [priorComplete ? previous.target:previous.source]:candidates,found=[]
+    for(const source of sources){const index=await readIndexAt(source,true);check();if(priorComplete&&!index)throw Error(t('indexInvalid'));if(index&&(priorComplete||index.items.length||index.folders.length))found.push({source,index})}
+    if(!found.length)return
+    if(found.length!==1)throw Error(t('migrationConflict'))
+    const {source,index}=found[0]
+    const edits=[],requiredFiles=[],noteEdits=new Set(),remap=path=>{
+      if(typeof path!=='string'||!path.startsWith(source+'/')||path.split('/').some(x=>!x||x==='.'||x==='..')||path.includes('\\'))throw Error(t('indexInvalid'))
+      return target+path.slice(source.length)
+    }
+    const items=[]
+    for(const item of index.items){
+      if(!validEntryId(item.id))throw Error(t('indexInvalid'))
+      const path=`.bluebird/${item.id}.json`,raw=await ctx.app.readFile(`${source}/${path}`);check()
+      const entry=JSON.parse(raw||'null')
+      if(!entry||entry.id!==item.id||!entry.notePath)throw Error(t('indexInvalid'))
+      const note=await ctx.app.readFile(entry.notePath);check()
+      if(note===null)throw Error(t('indexInvalid'))
+      const notePath=remap(entry.notePath)
+      const media=archivedMediaName(entry.summaryMarkdown)
+      if(media)requiredFiles.push(`${ASSETS_SUBDIR}/${media}`)
+      const noteRelative=entry.notePath.slice(source.length+1),nextNote=scopedMediaRefs(note,target,source,false)
+      if(nextNote!==note&&!noteEdits.has(noteRelative)){edits.push({path:noteRelative,before:note,after:nextNote});noteEdits.add(noteRelative)}
+      if(item.notePath&&item.notePath!==entry.notePath)throw Error(t('indexInvalid'))
+      edits.push({path,before:raw,after:JSON.stringify({...entry,notePath})});items.push({...item,notePath})
+    }
+    const path='.bluebird-index.json',raw=await ctx.app.readFile(`${source}/${path}`);check()
+    const latest=JSON.parse(raw||'null')
+    if(JSON.stringify(latest?.items)!==JSON.stringify(index.items)||JSON.stringify(latest?.folders||[])!==JSON.stringify(index.folders))throw Error(t('vaultChanged'))
+    const after=JSON.stringify({...index,items},null,2)
+    edits.push({path,before:raw,after})
+    await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source,target,plan:{index:{path,before,after},edits,requiredFiles}});check()
+    storageMigrated.add(scope);ctx.notify?.(t('migrationDone'),{level:'success'})
+  })().catch(error=>{storageUpgrades.delete(scope);ctx.notify?.(t('migrationFailed',{message:String(error.message||error)}),{level:'error'});throw error})
+  storageUpgrades.set(scope,work);return work
+}
 async function legacyData() {
   const current=folderRoot(),vault=taskScope(),found=[]
+  try{await upgradeStorage()}catch{}
+  if(storageMigrated.has(`${vault}\n${current}`))return []
   let currentCount=0
   try{currentCount=(await readIndexAt(current,true))?.items.length || 0}
   catch{return [{folder:current,error:true}]}
-  for(const folder of ['青鸟收藏夹','Bluebird','videos']){
+  for(const folder of LEGACY_FOLDERS){
     if(folder===current)continue
     try{const index=await readIndexAt(folder,true);if(index?.items.length)found.push({folder,count:index.items.length,current,currentCount})}
     catch{found.push({folder,error:true})}
@@ -802,7 +872,7 @@ async function legacyData() {
   return vault===taskScope()&&current===folderRoot() ? found:[]
 }
 function useLegacyFolder(folder) {
-  if (!['青鸟收藏夹','Bluebird','videos'].includes(folder)) return
+  if (!LEGACY_FOLDERS.includes(folder)) return
   localStorage.setItem(`plugin.${PLUGIN_ID}.workFolder`,folder)
   bus.emit({type:'saved'}); bus.emit({type:'folder-changed'})
 }
@@ -881,8 +951,8 @@ async function saveEntryInner(full,vault,folder) {
   const fm = ['---', `bluebird_id: ${id}`, `source: ${src}`, `platform: ${(full.meta && full.meta.platform) || plat.platform || ''}`, '---', ''].join('\n')
   // 顶部播放器块:在线源写裸 URL 一行(宿主的书签卡就地渲成播放器),已存档写 wiki 嵌入。
   // 有了它,"点正文时间戳 → 本笔记内的播放器就地跳过去" 这条最舒服的路径天然成立。
-  const player = full.kind === 'link' ? '' : localName ? `![[${localName}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
-  const body = linkifyTimestamps(full.summaryMarkdown, plat.watch, localName, ctx.registerEditorExtension ? id : null)
+  const player = full.kind === 'link' ? '' : localName ? `![[${assetVaultRel(localName)}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
+  const body = linkifyTimestamps(scopedMediaRefs(full.summaryMarkdown,folder), plat.watch, localName, ctx.registerEditorExtension ? id : null)
   if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
   const scopedWrite = async (p,text,create=false) => {
     if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
@@ -899,7 +969,8 @@ async function saveEntryInner(full,vault,folder) {
 }
 const loadEntry = async (id) => {
   try {
-    const t = (await ctx.app.readFile(dataPath(id))) || (folderRoot() !== LEGACY_ROOT ? await ctx.app.readFile(`${LEGACY_ROOT}/.bluebird/${id}.json`) : null)
+    await upgradeStorage()
+    const t = await ctx.app.readFile(dataPath(id))
     return t ? JSON.parse(t) : null
   } catch { return null }
 }
@@ -927,6 +998,20 @@ function parseTimeReference(href) {
   const p = new URLSearchParams(href.slice(1)), id = p.get('bluebird'), at = citationSeconds(p.get('t'))
   if (p.getAll('bluebird').length !== 1 || p.getAll('t').length !== 1 || !validEntryId(id) || at == null) return null
   return { entryId: id, at }
+}
+function scopedMediaRefs(text,target,source='',scopeBare=true) {
+  let fence=null
+  return String(text||'').split('\n').map(line=>{
+    const marker=/^\s*(`{3,}|~{3,})/.exec(line)?.[1]
+    if(marker){if(!fence)fence=marker;else if(marker[0]===fence[0]&&marker.length>=fence.length)fence=null;return line}
+    if(fence||line.includes('`'))return line
+    return line.replace(/(!?\[\[)([^\]|#]+)([^\]]*\]\])/g,(all,open,ref,tail)=>{
+      let next=ref
+      if(source&&ref.startsWith(source+'/'))next=target+ref.slice(source.length)
+      else if(scopeBare&&/\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v)$/i.test(ref)&&(!ref.includes('/')||ref.startsWith('assets/')))next=`${target}/${ASSETS_SUBDIR}/${ref.replace(/^assets\//,'')}`
+      return open+next+tail
+    })
+  }).join('\n')
 }
 function archivedMediaName(summary) {
   const name = (/!\[\[([^\]|#]+\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v))\]\]/i.exec(summary || '') || [])[1]
@@ -1085,6 +1170,7 @@ async function ensureWorkFolder() {
   if (!root) return // 老宿主没有库就绪信号时也不预建;首次保存会自然建立目录。
   const folder = folderRoot()
   try {
+    await upgradeStorage()
     const existing = await ctx.app.readFile(`${folder}/.bluebird-index.json`)
     if (existing !== null || ctx.app.vaultRoot() !== root || folderRoot() !== folder) return
     await ctx.app.writeFile(`${folder}/.bluebird-index.json`, JSON.stringify({ folders: [], items: [] }, null, 2))
@@ -1227,6 +1313,7 @@ async function qCancel(id) {
 async function qPump() {
   if (queue.processing) return
   await runtimeReady
+  try{await upgradeStorage()}catch{return}
   if (queue.processing || pluginDisposed) return
   const it = queue.items.find((i) => i.status === 'pending' && !i.hidden && belongsHere(i))
   if (!it) return
@@ -2321,7 +2408,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
   Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
