@@ -109,3 +109,11 @@ node verify.mjs      # 校验 skill/agent/plugin 契约 + 跑 plugin check.mjs(�
 
 
 Fresh network acceptance (no cached media): run Forsion's bundled Python with `harness/retrieval.live.py --out outputs/retrieval-live`. It fetches BV1G4Jy6wEok into a fresh temporary directory and checks source identity, audio duration, WAV rate/channels and archive bytes/hash. `node harness/upgrade.e2e.cjs` now covers automatic migration, native note opening, original backup and restart without duplicate imports.
+
+To reproduce an interrupted predecessor after its index commit (with the original root backup retained), run under devlock:
+
+```sh
+PLUGIN_LEGACY_NESTED=1 PLUGIN_PRIOR_JOURNAL=interrupted BLUEBIRD_DESKTOP=/absolute/desktop node harness/upgrade.e2e.cjs
+```
+
+复验前序索引已提交但日志未完成的情况：同时设置上述两个环境变量；全程使用隔离智库。
