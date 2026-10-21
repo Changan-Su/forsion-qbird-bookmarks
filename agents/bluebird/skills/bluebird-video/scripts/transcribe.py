@@ -454,7 +454,7 @@ def bilibili_web_info(url, ydl, headers):
         print("Bilibili subtitles unavailable; retrieving audio: %s" % type(exc).__name__, file=sys.stderr)
         subtitles = {}
     return {
-        "id": bvid, "title": view["title"] if part == 1 else page.get("part") or view["title"],
+        "id": bvid if len(view.get("pages", [])) == 1 else f"{bvid}_p{part}", "title": view["title"] if part == 1 else page.get("part") or view["title"],
         "duration": duration, "uploader": (view.get("owner") or {}).get("name", ""),
         "description": view.get("desc", ""), "thumbnail": view.get("pic", ""),
         "webpage_url": url, "formats": formats, "subtitles": subtitles,
@@ -535,7 +535,9 @@ def run(url, save_to=None):
                 except Exception as exc:
                     print("音频存档失败(不影响转写):%s" % exc, file=sys.stderr)
 
-        keep = Path(tempfile.gettempdir()) / f"bluebird-asr-{safe_stem(meta.get('videoId')) or 'audio'}.wav"
+        keep_fd, keep_path = tempfile.mkstemp(prefix=f"bluebird-asr-{safe_stem(meta.get('videoId'))}-", suffix=".wav")
+        os.close(keep_fd)
+        keep = Path(keep_path)
         shutil.move(str(audio), str(keep))  # 必须搬出 work_dir —— finally 会把它整个删掉
         out = {"ok": True, "source": "needs_asr", "meta": meta, "audio_path": str(keep),
                "note": "无原生字幕;音频已转 16kHz 单声道 WAV,待宿主用 Forsion 语音识别转写"}

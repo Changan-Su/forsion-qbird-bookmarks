@@ -50,6 +50,7 @@ class RetrievalChecks(unittest.TestCase):
         with patch.dict(sys.modules, {"yt_dlp.extractor.bilibili": types.SimpleNamespace(BiliBiliIE=Extractor)}):
             result = module.bilibili_web_info("https://www.bilibili.com/video/BV1G4Jy6wEok?p=2", None, {})
             self.assertEqual(calls, [2])
+            self.assertEqual(result["id"], "BV1G4Jy6wEok_p2")
             self.assertEqual(result["duration"], 10)
             self.assertEqual(result["formats"][0]["bluebird_backup_urls"], ["https://media.example/backup"])
             with self.assertRaisesRegex(RuntimeError, "unavailable"):

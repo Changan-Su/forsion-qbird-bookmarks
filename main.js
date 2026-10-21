@@ -801,21 +801,22 @@ async function readIndex() {
 const storageUpgrades = new Map(), storageMigrated = new Set()
 function upgradeStorage() {
   const vault=ctx.app.vaultRoot?.(),target=folderRoot(),scope=`${vault}\n${target}`
-  if(!vault || !ctx.app.migrateWorkFolder || localStorage.getItem(`plugin.${PLUGIN_ID}.workFolder`) || !target.startsWith('Plugins/'))return Promise.resolve()
+  if(!vault || String(vault).includes('://') || !ctx.app.migrateWorkFolder || localStorage.getItem(`plugin.${PLUGIN_ID}.workFolder`) || !target.startsWith('Plugins/'))return Promise.resolve()
   if(storageUpgrades.has(scope))return storageUpgrades.get(scope)
   const work=(async()=>{
     const check=()=>{if(vault!==ctx.app.vaultRoot?.()||target!==folderRoot())throw Error(t('vaultChanged'))}
     const candidates=['青鸟收藏夹','Bluebird','videos'],id='legacy-root-v1'
     if((await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source:candidates[0],target})).status==='complete'){storageMigrated.add(scope);return}
     check()
+    const before=await ctx.app.readFile(`${target}/.bluebird-index.json`);check()
+    const current=await readIndexAt(target,true);check()
+    if(current?.items.length || current?.folders.length)return // Preserve an already-used collection; recovery compares both.
     const found=[]
     for(const source of candidates){const index=await readIndexAt(source,true);check();if(index?.items.length)found.push({source,index})}
     if(!found.length)return
     if(found.length!==1)throw Error(t('migrationConflict'))
-    const {source,index}=found[0],before=await ctx.app.readFile(`${target}/.bluebird-index.json`);check()
-    const current=await readIndexAt(target,true);check()
-    if(current?.items.length || current?.folders.length)throw Error(t('migrationConflict'))
-    const edits=[],requiredFiles=[],remap=path=>{
+    const {source,index}=found[0]
+    const edits=[],requiredFiles=[],noteEdits=new Set(),remap=path=>{
       if(typeof path!=='string'||!path.startsWith(source+'/')||path.split('/').some(x=>!x||x==='.'||x==='..')||path.includes('\\'))throw Error(t('indexInvalid'))
       return target+path.slice(source.length)
     }
@@ -830,6 +831,8 @@ function upgradeStorage() {
       const notePath=remap(entry.notePath)
       const media=archivedMediaName(entry.summaryMarkdown)
       if(media)requiredFiles.push(`${ASSETS_SUBDIR}/${media}`)
+      const noteRelative=entry.notePath.slice(source.length+1),nextNote=scopedMediaRefs(note,target,source)
+      if(nextNote!==note&&!noteEdits.has(noteRelative)){edits.push({path:noteRelative,before:note,after:nextNote});noteEdits.add(noteRelative)}
       if(item.notePath&&item.notePath!==entry.notePath)throw Error(t('indexInvalid'))
       edits.push({path,before:raw,after:JSON.stringify({...entry,notePath})});items.push({...item,notePath})
     }
@@ -840,7 +843,7 @@ function upgradeStorage() {
     edits.push({path,before:raw,after})
     await ctx.app.migrateWorkFolder({id,expectedRoot:vault,source,target,plan:{index:{path,before,after},edits,requiredFiles}});check()
     storageMigrated.add(scope);ctx.notify?.(t('migrationDone'),{level:'success'})
-  })().catch(error=>{ctx.notify?.(t('migrationFailed',{message:String(error.message||error)}),{level:'error'});throw error})
+  })().catch(error=>{storageUpgrades.delete(scope);ctx.notify?.(t('migrationFailed',{message:String(error.message||error)}),{level:'error'});throw error})
   storageUpgrades.set(scope,work);return work
 }
 async function legacyData() {
@@ -937,8 +940,8 @@ async function saveEntryInner(full,vault,folder) {
   const fm = ['---', `bluebird_id: ${id}`, `source: ${src}`, `platform: ${(full.meta && full.meta.platform) || plat.platform || ''}`, '---', ''].join('\n')
   // 顶部播放器块:在线源写裸 URL 一行(宿主的书签卡就地渲成播放器),已存档写 wiki 嵌入。
   // 有了它,"点正文时间戳 → 本笔记内的播放器就地跳过去" 这条最舒服的路径天然成立。
-  const player = full.kind === 'link' ? '' : localName ? `![[${localName}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
-  const body = linkifyTimestamps(full.summaryMarkdown, plat.watch, localName, ctx.registerEditorExtension ? id : null)
+  const player = full.kind === 'link' ? '' : localName ? `![[${assetVaultRel(localName)}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
+  const body = linkifyTimestamps(scopedMediaRefs(full.summaryMarkdown,folder), plat.watch, localName, ctx.registerEditorExtension ? id : null)
   if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
   const scopedWrite = async (p,text,create=false) => {
     if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
@@ -956,7 +959,7 @@ async function saveEntryInner(full,vault,folder) {
 const loadEntry = async (id) => {
   try {
     await upgradeStorage()
-    const t = (await ctx.app.readFile(dataPath(id))) || (folderRoot() !== LEGACY_ROOT ? await ctx.app.readFile(`${LEGACY_ROOT}/.bluebird/${id}.json`) : null)
+    const t = await ctx.app.readFile(dataPath(id))
     return t ? JSON.parse(t) : null
   } catch { return null }
 }
@@ -984,6 +987,14 @@ function parseTimeReference(href) {
   const p = new URLSearchParams(href.slice(1)), id = p.get('bluebird'), at = citationSeconds(p.get('t'))
   if (p.getAll('bluebird').length !== 1 || p.getAll('t').length !== 1 || !validEntryId(id) || at == null) return null
   return { entryId: id, at }
+}
+function scopedMediaRefs(text,target,source='') {
+  return String(text||'').replace(/(!?\[\[)([^\]|#]+)([^\]]*\]\])/g,(all,open,ref,tail)=>{
+    let next=ref
+    if(source&&ref.startsWith(source+'/'))next=target+ref.slice(source.length)
+    else if(/\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v)$/i.test(ref)&&(!ref.includes('/')||ref.startsWith('assets/')))next=`${target}/${ASSETS_SUBDIR}/${ref.replace(/^assets\//,'')}`
+    return open+next+tail
+  })
 }
 function archivedMediaName(summary) {
   const name = (/!\[\[([^\]|#]+\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v))\]\]/i.exec(summary || '') || [])[1]
