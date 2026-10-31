@@ -8,6 +8,13 @@ Essentials: workbench fixes and library actions / 工作台修复与收藏管理
 - New notes use the title as the file name, the date moves to the note properties, and the title appears once. Existing notes are unchanged. 新笔记文件名用标题，日期进属性，标题只出现一次；旧笔记不变。
 - Wording is unified around save, organize and note. Menu emoji are gone and buttons follow the host control radius. 用词统一为收藏、整理、笔记；去掉菜单 emoji，按钮圆角跟随宿主。
 
+Library desk and folder tree / 收藏台与文件夹树
+
+- Home is now a desk: one input line that expands on paste, then In progress, Needs attention and Recently organized. Enter saves, ⌘/Ctrl+Enter saves and organizes, and the paperclip imports local files. Instructions, saved presets, template, length and drafts stay. 主页改为收藏台：一行输入框，粘贴后展开；下面是进行中、需要你处理、最近整理。回车仅收藏，⌘/Ctrl+回车收藏并整理，回形针导入本地文件；整理要求、常用要求、模板、长度和草稿都保留。
+- The sidebar shows folders as a tree on hosts that support it, with bookmarks below. Drag into a folder or between unfiled rows to move, with Undo; folders rename in place and can be reordered. Older hosts keep the filter list. 支持树形的宿主上，左栏改为文件夹树，未分类平铺在下。拖动即可移入或移出文件夹并可撤销，文件夹可原地改名、拖动排序；旧宿主保留筛选列表。
+- Running tasks appear in the list at once and are never written to the index until they finish. Dates read today, yesterday and N days ago; search flattens the list and names the folder. 任务一开始就进列表，完成前不写索引。日期显示今天、昨天、N 天前；搜索压平列表并显示所在文件夹。
+- An unreadable index now says so on the home page and in the list, and is never treated as an empty library. 索引读不出来时主页和左栏都会说明，不再当成空库。
+
 ## 2.3.1 — 2026-10-21
 
 Automatic upgrade migration and Bilibili retrieval / 自动迁移与 B 站获取修复

@@ -469,6 +469,70 @@ A.equal(writes.length, wN, '已有索引不重复写(幂等)')
   off(); ctx.notify = notifyBefore; V.delete(path); V.delete(side); V.delete('n2.md')
 }
 
+// ── 2.5 左栏文件夹树:文件夹在上,运行中只从 queue 合成,拖动落盘可撤销,读失败不当空 ──
+{
+  const now = new Date(2026, 9, 31)
+  A.deepEqual(['2026-10-31', '2026-10-30', '2026-10-25', '2026-10-24', '2026-10-23', '2025-12-30', '2026-11-02', ''].map((d) => T.relDate(d, now)),
+    ['今天', '昨天', '6 天前', '7 天前', '10-23', '2025-12-30', '11-02', ''], 'today, yesterday, N days, then month-day; the year only when it differs')
+  A.equal(T.bareUrl('https://example.com/a/'), 'example.com/a')
+  const before = { ...T }, notes = []; let LS = null
+  const off2 = new Function('ctx', src)({ ...ctx, listCapabilities: ['tree', 'items', 'rename', 'group'], registerListSource: (x) => { LS = x }, registerView() {}, registerCommand() {}, registerSetting() {}, registerReadiness() {},
+    registerStatusItem: () => ({ update() {}, dispose() {} }), subscribeLocale: () => () => {}, notify: (m, o) => notes.push({ m, o }) })
+  const T2 = { ...T }; Object.assign(T, before)
+  const path = `${T.folderRoot()}/.bluebird-index.json`, read = () => JSON.parse(V.get(path)), settle = () => new Promise((r) => setTimeout(r, 10))
+  V.set(path, JSON.stringify({ folders: [{ id: 'f1', name: 'Learning' }, { id: 'f2', name: 'Design' }], items: [
+    { id: 'a', title: 'https://example.com/raw', date: '2026-10-30', videoUrl: 'https://example.com/raw' }, { id: 'b', title: 'Beta', folderId: 'f1' }, { id: 'c', title: 'Gamma', folderId: 'gone' }, { id: 'd', title: 'Delta', folderId: 'f2' }] }))
+  const off = LS.subscribe(() => {}); await settle()
+  A.equal(LS.groups, undefined, 'a tree host gets no filter menu')
+  A.deepEqual(LS.actions.map((x) => [x.primary, x.icon]), [[true, 'plus']])
+  A.deepEqual(LS.groupActions.map((x) => x.label), [T.t('newFolder')], 'the overflow names an action, not an input prompt')
+  A.deepEqual(LS.items({}).map((r) => r.key), ['folder:f1', 'folder:f2', 'a', 'b', 'c', 'd'], 'folders first; a dangling folder id is unfiled')
+  A.equal(LS.items({}).find((r) => r.key === 'b').parent, 'folder:f1')
+  A.equal(LS.items({}).find((r) => r.key === 'c').parent, undefined)
+  A.equal(LS.items({}).find((r) => r.key === 'a').title, 'example.com/raw')
+  A.equal(LS.items({})[0].hint, '1')
+  A.ok(LS.items({ query: 'be', group: undefined }).every((r) => r.kind !== 'folder' && !r.parent))
+  A.equal(LS.items({ query: 'be', group: undefined })[0].subtitle, 'Learning', 'search names the folder')
+  A.deepEqual(LS.items({ query: '' }).map((r) => r.key), ['a', 'b', 'c', 'd'], 'the Intelligent UI card draws flat rows, so it gets no folders')
+  // 运行中:进列表、不进索引;完成前是合成行,绑定已有条目时写在原行第二行
+  T2.queue.items.push({ id: 't1', status: 'parsing', url: 'https://example.com/run', vault: T.taskScope?.() ?? '', progressKey: 'stQueued', plat: {} }, { id: 't2', status: 'parsing', url: 'https://example.com/b', replaceEntry: 'b', progressKey: 'stQueued', plat: {} })
+  const live = LS.items({})
+  A.ok(live.some((r) => r.key === 'run:t1' && r.subtitle && !r.draggable), 'a running task is a row with a second line and cannot be dragged')
+  A.ok(!read().items.some((x) => x.id === 't1'), 'a running task is never written to the index')
+  A.ok(live.find((r) => r.key === 'b').subtitle, 'a task on an existing entry marks that row')
+  A.equal(live.filter((r) => r.key === 'run:t2').length, 0, 'and does not add a second row')
+  A.deepEqual(LS.items({ query: '' }).map((r) => r.key), ['a', 'b', 'c', 'd'], 'the card never lists tasks')
+  T2.queue.items.splice(0)
+  // 拖动
+  const folderRow = (id) => ({ key: 'folder:' + id, kind: 'folder' }), can = (keys, target) => LS.drop.canDrop({ items: keys }, target)
+  A.equal(can(['a'], { item: folderRow('f1'), position: 'into' }), true)
+  A.equal(can(['b'], { item: folderRow('f1'), position: 'into' }), false, 'already there')
+  A.equal(can(['a'], { item: folderRow('f1'), position: 'before' }), false, 'a bookmark cannot sit between folders')
+  A.equal(can(['a'], { item: { key: 'c' }, position: 'after' }), false, 'unfiled to unfiled changes nothing: order is by time')
+  A.equal(can(['b'], { item: { key: 'a' }, position: 'after' }), true, 'between unfiled rows = out of the folder')
+  A.equal(can(['folder:f2'], { item: folderRow('f1'), position: 'into' }), false, 'folders do not nest')
+  A.equal(can(['run:t1'], { item: folderRow('f1'), position: 'into' }), false, 'tasks stay out of folders')
+  await LS.drop.onDrop({ items: ['a'] }, { item: folderRow('f2'), position: 'into' }); await settle()
+  A.equal(read().items.find((x) => x.id === 'a').folderId, 'f2', 'a drop lands on disk')
+  notes.at(-1).o.action.run(); await settle()
+  A.equal(read().items.find((x) => x.id === 'a').folderId ?? null, null, 'undo puts it back')
+  await LS.drop.onDrop({ items: ['b'] }, { item: { key: 'd', parent: 'folder:f2' }, position: 'before' }); await settle()
+  A.equal(read().items.find((x) => x.id === 'b').folderId, 'f2', 'between the rows of a folder = into that folder')
+  await LS.drop.onDrop({ items: ['b'] }, { item: { key: 'a' }, position: 'after' }); await settle()
+  A.equal(read().items.find((x) => x.id === 'b').folderId, null, 'and back out')
+  await LS.drop.onDrop({ items: ['folder:f2'] }, { item: folderRow('f1'), position: 'before' }); await settle()
+  A.deepEqual(read().folders.map((f) => f.id), ['f2', 'f1'], 'folder order is the array order')
+  await LS.rename({ key: 'folder:f1', kind: 'folder' }, ' Study\n'); await settle()
+  A.equal(read().folders.find((f) => f.id === 'f1').name, 'Study')
+  // 读失败:留着上一份,不当空,也不往回写
+  const rowsBefore = LS.items({}).length, broken = '{bad'
+  V.set(path, broken); T2.bus.emit({ type: 'saved' }); await settle()
+  A.equal(LS.items({})[0].key, 'index-error', 'a failed read says so')
+  A.equal(LS.items({}).length, rowsBefore + 1, 'and keeps the rows it knew')
+  A.equal(V.get(path), broken, 'and writes nothing back')
+  off(); off2(); V.delete(path)
+}
+
 // ── 2.4 笔记标题只出现一次:文件名是标题,日期进属性,正文不重复同一句 H1 ──
 {
   A.equal(T.dropRepeatedTitle('# Title\n\nBody', 'Title'), 'Body')
