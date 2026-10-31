@@ -155,11 +155,13 @@ class RetrievalChecks(unittest.TestCase):
             pages = iter([{}, data, data])  # 第一次响应只种 cookie,没有视频数据
             return types.SimpleNamespace(urlopen=lambda request: Page("<script>window._ROUTER_DATA = %s</script>" % json.dumps(next(pages))))
         full = {"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": [{"desc": "Clip", "author": {"nickname": "Author"}, "video": {"duration": 8010, "play_addr": {"url_list": ["https://aweme.example/playwm/?video_id=1"]}}}]}}}}
-        info = module.douyin_web_info("https://www.douyin.com/video/123", ydl_for(full))
-        self.assertEqual((info["id"], info["uploader"], info["duration"]), ("123", "Author", 8.01))
-        self.assertEqual(info["formats"][0]["url"], "https://aweme.example/playwm/?video_id=1")
-        with self.assertRaisesRegex(RuntimeError, "unavailable"):
-            module.douyin_web_info("https://www.douyin.com/video/123", ydl_for({"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": []}}}}))
+        networking = types.SimpleNamespace(Request=lambda url, headers=None: url)
+        with patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(), "yt_dlp.networking": networking}):
+            info = module.douyin_web_info("https://www.douyin.com/video/123", ydl_for(full))
+            self.assertEqual((info["id"], info["uploader"], info["duration"]), ("123", "Author", 8.01))
+            self.assertEqual(info["formats"][0]["url"], "https://aweme.example/playwm/?video_id=1")
+            with self.assertRaisesRegex(RuntimeError, "unavailable"):
+                module.douyin_web_info("https://www.douyin.com/video/123", ydl_for({"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": []}}}}))
 
 
 if __name__ == "__main__":
