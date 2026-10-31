@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** Called by the host live harness: real isolated engine and GPT-6 Luna, supplied source text. */
@@ -25,6 +25,17 @@ export async function checkBluebirdLive({ run, out }) {
     const countCorrect=questionCount===(item.key==='bilingual'?5:3)
     const ok=!response.error&&response.done&&loaded&&noFetch&&format&&language&&fullParallel&&countCorrect&&/17/.test(text)
     evidence.push({key:item.key,ok,loaded,noFetch,format,language,fullParallel,countCorrect,response})
+  }
+  // 普通网页走 main.js 里的同一句任务。第一条读真实页面,第二条读不到时必须如实报错。
+  const pageTask=new Function(readFileSync(new URL('../main.js',import.meta.url),'utf8').match(/^const pageTask = .*$/m)[0]+';return pageTask')()
+  const blockOf=text=>{try{return JSON.parse((/```(?:json\s+bluebird|bluebird)\s*([\s\S]*?)```/i.exec(text)||[])[1])}catch{return null}}
+  for(const item of [{key:'page',url:'https://example.com/'},{key:'pagefail',url:'https://bluebird-live-check.invalid/missing'}]){
+    const prompt=`${pageTask(item.url)}\nReturn Markdown, then a fenced block:\n\`\`\`json bluebird\n{"meta":{"title":"","platform":"","videoId":"","videoUrl":${JSON.stringify(item.url)},"author":"","duration":0,"thumbnail":""},"segments":[],"chapters":[],"tags":[]}\n\`\`\`\nIf retrieval fails, return only a bluebird JSON block with {"error":{"stage":"metadata","message":"the actual error"}}.`
+    const response=await run('bluebird-live-'+item.key+'-'+Date.now(),prompt,240000,{agentSlug:'bluebird',execMode:'host'})
+    const text=response.content || '',data=blockOf(text)
+    const fetched=response.toolCalls.includes('web_fetch'),noScripts=!response.toolCalls.includes('run_bash')
+    const result=item.key==='page'?!!data?.meta&&/example domain/i.test(data.meta.title+text):!!data?.error&&!data.meta
+    evidence.push({key:item.key,ok:!response.error&&response.done&&fetched&&noScripts&&result,loaded:fetched,noFetch:noScripts,language:result,response})
   }
   writeFileSync(join(out,'bluebird-evidence.json'),JSON.stringify(evidence,null,2))
   return {ok:evidence.every(e=>e.ok),detail:evidence.map(e=>`${e.key}: ${e.ok?'PASS':'FAIL'}; skill ${e.loaded}; language ${e.language}; no fetch ${e.noFetch}\n${e.response.content}`).join('\n\n'),evidence}
