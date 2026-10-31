@@ -1,5 +1,16 @@
 ## Unreleased
 
+Media storage / 媒体存储
+
+- Choose what each new save keeps: nothing, audio (default) or the full video, with a size limit per file (500 MB by default). Short videos from Xiaohongshu and Douyin keep their video on the audio level because the content is in the picture. Full video stops at 1080p.
+- Entries show the media type and size, and can reveal or remove the file. When a file is too large or missing, the entry says so and plays online.
+- The new storage page lists usage by saved item, sorts by largest, oldest or never opened, and moves files to the trash. Notes and transcripts stay. Removed files leave their `![[…]]` embed in the note.
+- Files shared with another saved item are called out before removal. Deleting a saved item only offers to remove files nothing else uses, and cleanup pauses while any entry cannot be read.
+- 每次新收藏可选不保存、音频（默认）或完整视频，并有单文件上限（默认 500 MB）。小红书和抖音的短视频内容在画面上，选音频时也保留视频。完整视频最高 1080p。
+- 详情页显示媒体类型和大小，可在文件夹中显示或移除。文件过大或已丢失时会说明原因并改为在线播放。
+- 新增存储页：按收藏看占用，可按最大、最久没看、未打开排序，文件移入回收站，笔记和字幕保留。移除后笔记里的 `![[…]]` 不改写。
+- 移除多条收藏共用的文件前会提示。删除收藏时只询问没有其他收藏在用的文件；有条目读取失败时暂停清理。
+
 Media retrieval fixes / 媒体获取修复
 
 - Xiaohongshu videos without an audio track no longer fail: the video, cover and post text are saved. Music-only videos are organized from the post text instead of an empty transcript. Authors show their nickname, `/user/profile` links and `xhslink.cn` work, and share text with Chinese punctuation is cleaned.
