@@ -1807,6 +1807,7 @@ const STYLE = `
 .bb-root .bb-shelf .bb-qrow:hover{background:var(--overlay-subtle,var(--bb-surf))}
 .bb-root .bb-shelf .bb-qrow .ttl{font-size:var(--ui-font-body,13px);line-height:20px}
 .bb-root .bb-shelf .bb-qrow .sub{font-size:var(--ui-font-meta,12px);line-height:17px;margin:0;color:var(--text-muted,var(--bb-text-muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-root .bb-shelf .bb-prog-track{height:2px}
 .bb-root .bb-qdate{flex:none;font-size:var(--ui-font-meta,12px);color:var(--text-faint,var(--bb-text-muted))}
 .bb-root .bb-home-empty{padding:32px 10px;text-align:center;color:var(--text-muted,var(--bb-text-muted))}
 .bb-root .bb-recovery{padding:12px 14px;margin:16px 0;background:var(--bb-surf);border:1px solid var(--bb-border);border-radius:var(--radius-md,8px);font-size:var(--ui-font-body,13px)}
@@ -1940,6 +1941,7 @@ function mountAnalyze(el, viewCtx) {
   let mediaScope = playbackScope()
   let homeCheck = null // 首页链接提示行的重算入口(切语言回填链接后要重跑一次)
   let homeEmpty = null
+  const organizing = new Set()
   const say2 = say
 
   // ── 首页:输入面板 + 分析队列面板(照原版 LinkInputPanel + AnalysisQueueList 同屏) ──
@@ -2036,7 +2038,7 @@ function mountAnalyze(el, viewCtx) {
     }
     section(t('secRunning'), running.length, running.map(queueRow))
     const shownLinks = links.slice(0, SHELF_ROWS)
-    section(t('secAttention'), waiting.length + links.length, [...waiting.map(queueRow), ...shownLinks.map((x) => entryShelfRow(x, `${t('savedOnly')} · ${relDate(x.date)}`, '', [[t('organize'), () => organizeEntry(x.id)], [t('menuDelete'), () => void guarded(() => removeEntry(x.id))]]))]
+    section(t('secAttention'), waiting.length + links.length, [...waiting.map(queueRow), ...shownLinks.map((x) => entryShelfRow(x, `${t('savedOnly')} · ${relDate(x.date)}`, '', [[t('organize'), () => void guarded(() => organizeEntry(x.id))], [t('menuDelete'), () => void guarded(() => removeEntry(x.id))]]))]
       .concat(links.length > shownLinks.length ? [moreRow(links.length - shownLinks.length)] : []))
     section(t('secRecent'), recent.length, recent.slice(0, SHELF_ROWS).map((x) => entryShelfRow(x, [x.platform ? platLabel(x.platform) : '', x.author].filter(Boolean).join(' · '), relDate(x.date))))
     if (!box.childElementCount && listLoaded) {
@@ -2047,9 +2049,15 @@ function mountAnalyze(el, viewCtx) {
   }
   function moreRow(n) { const more = document.createElement('div'); more.className = 'bb-shelf-more'; more.textContent = t('moreItems', { n }); return more }
   async function organizeEntry(id) {
-    const full = await loadEntry(id) // 收藏时写的要求在 sidecar 里,这里读不到就别当没写过
-    if (!full) { say2(t('entryMissing'), { level: 'error' }); return }
-    renderRun(qAdd(full.sourceUrl || full.meta?.videoUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), full.requirements || '', { replaceEntry: id }))
+    const scope = playbackScope(), claim = scope + '\n' + id
+    if (organizing.has(claim)) return // 读 sidecar 期间按钮还在,连点不能排两个任务
+    organizing.add(claim)
+    try {
+      const full = await loadEntry(id) // 收藏时写的要求在 sidecar 里,这里读不到就别当没写过
+      if (disposed || scope !== playbackScope()) return // 切库后不能把 A 库的内容替换进 B 库的同 id 条目
+      if (!full) { say2(t('entryMissing'), { level: 'error' }); return }
+      renderRun(qAdd(full.sourceUrl || full.meta?.videoUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), full.requirements || '', { replaceEntry: id }))
+    } finally { organizing.delete(claim) }
   }
   function entryShelfRow(entry, subText, date, actions = []) {
     const row = document.createElement('div'); row.className = 'bb-qrow'; row.dataset.entryId = entry.id

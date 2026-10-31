@@ -117,3 +117,7 @@ PLUGIN_LEGACY_NESTED=1 PLUGIN_PRIOR_JOURNAL=interrupted BLUEBIRD_DESKTOP=/absolu
 ```
 
 复验前序索引已提交但日志未完成的情况：同时设置上述两个环境变量；全程使用隔离智库。
+
+## Real-window check
+
+`BLUEBIRD_DESKTOP=<built desktop> node harness/essentials.e2e.cjs` drives a real Electron window with a stub engine and an isolated home, including real drags that are read back from the index on disk. `BLUEBIRD_LEGACY_HOST=1` hides `ctx.listCapabilities` to check the fallback filter list. `BLUEBIRD_PLUGIN=<old checkout>` is the negative control. Run it under `devlock` from the workspace root.

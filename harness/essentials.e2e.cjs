@@ -250,9 +250,10 @@ async function main(){
   check('In progress disappears when nothing runs',!(await sections()).includes('进行中'))
   // 需要你处理:整理后消失,失败可重试
   stub.script(run(answer('Organized link','','https://example.com/raw/path')))
-  await win.locator('.bb-qrow[data-entry-id="n-link"] .acts button').first().click()
+  await win.locator('.bb-qrow[data-entry-id="n-link"] .acts button').first().dblclick()
   await win.waitForFunction(()=>__bb.queue.items.some(i=>i.replaceEntry==='n-link'&&i.status==='completed'),null,{timeout:15000});await wait(900)
   const organized=index().items.find(x=>x.id==='n-link')
+  check('a double click queues one task',await win.evaluate(()=>__bb.queue.items.filter(i=>i.replaceEntry==='n-link').length)===1)
   check('organizing a saved link keeps its requirements',await win.evaluate(()=>__bb.queue.items.find(i=>i.replaceEntry==='n-link')?.requirements)==='Keep the code samples')
   await goHome()
   check('an organized link leaves Needs attention',organized&&organized.kind!=='link'&&await win.locator('.bb-shelf-h',{hasText:'最近整理'}).count()===1&&await win.locator('.bb-qrow[data-entry-id="n-link"] .acts').count()===0)
