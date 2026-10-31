@@ -26,7 +26,15 @@ const MSG = {
     setTplDesc: '通用/学术/访谈/播客/会议/新闻/教程/Vlog/旅行/测评',
     setDetailLabel: '默认详细程度(brief/standard/detailed)',
     setDetailDesc: '简洁/标准/详细',
-    setMediaLabel: '存原始素材', setMediaDesc: '把图文帖的图片、视频的原始音频一并下载进收藏夹的 assets/,笔记里内嵌本地文件而不是外链(外链会随平台 CDN 过期失效)。占磁盘,不想要就关掉。',
+    setMediaCapLabel: '单个文件上限(MB)', setMediaCapDesc: '超过上限不保存媒体,笔记照常生成,并在详情页说明。',
+    mediaLevelLabel: '媒体保存', mediaLevelDesc: '新收藏时保存到本地的内容。小红书和抖音的短视频内容主要在画面上,选「音频」时也存视频。',
+    mediaNone: '不保存', mediaAudio: '音频', mediaVideo: '完整视频', mediaManage: '管理', mediaUsage: '已用 {size},位于 {path}', mediaUsageUnknown: '位于 {path}',
+    mediaLocalAudio: '本地音频', mediaLocalVideo: '本地视频', mediaReveal: '在文件夹中显示', mediaRemove: '移除', mediaNotSaved: '未保存到本地', mediaTooLarge: '文件 {size},超过上限,未保存', mediaNotHere: '此设备未保存',
+    mediaRemoveTitle: '移除这份媒体文件?', mediaRemoveBody: '文件进回收站,可以恢复。笔记和字幕保留,这里改为在线播放。', mediaRemoveOk: '移入回收站',
+    delMediaTitle: '同时移除媒体文件?', delMediaBody: '这条收藏有 {count} 个本地媒体文件,共 {size}。移除后进回收站,可以恢复。', delMediaOk: '一并移除', delMediaKeep: '保留文件',
+    libStorage: '存储', storageTitle: '存储', storageSum: '收藏夹占用 {size} · {count} 项 · {path}', storageEmpty: '还没有保存媒体文件。', storageVideo: '视频', storageAudio: '音频', storageImage: '图片',
+    storageLargest: '最大', storageOldest: '最久没看', storageUnopened: '未打开', storageNone: '没有符合条件的文件。', storageOrphan: '未关联收藏', storageImages: '{count} 张图', storageNever: '未打开', storageDays: '{count} 天前看过', storageToday: '今天看过',
+    storageSelected: '已选 {count} 项 · {size}。笔记和字幕保留,文件进回收站可恢复', storageHint: '勾选要清理的文件。笔记和字幕会保留。', storageTrash: '移入回收站', storageNoTrash: '这个设备不支持移入回收站。', storageFailed: '有 {count} 个文件没能移除。', storageLoading: '正在统计…', storageUnknown: '大小未知',
     setAutoLabel: '增强自动模式',
     setAutoDesc: '在任意 Tangu 对话里单独丢一条链接、语境没有歧义时,不再问一句,直接抓正文存进笔记库',
     // 模板 / 详细度(值是中文 canonical,这里只是显示名)
@@ -117,7 +125,15 @@ const MSG = {
     setTplDesc: 'General / Academic / Interview / Podcast / Meeting / News / Tutorial / Vlog / Travel / Review',
     setDetailLabel: 'Default detail level (brief/standard/detailed)',
     setDetailDesc: 'Brief / Standard / Detailed',
-    setMediaLabel: 'Archive media', setMediaDesc: "Download image-post pictures and video audio into the library's assets/ folder and embed the local files, instead of hotlinking (hotlinks die when the platform's CDN expires them). Uses disk; turn off if you'd rather not.",
+    setMediaCapLabel: 'File size limit (MB)', setMediaCapDesc: 'Media above this limit is not saved. The note is still created, and the detail view explains why.',
+    mediaLevelLabel: 'Media saving', mediaLevelDesc: 'What new bookmarks save locally. Xiaohongshu and Douyin clips rely on the picture, so Audio still saves the video.',
+    mediaNone: 'None', mediaAudio: 'Audio', mediaVideo: 'Full video', mediaManage: 'Manage', mediaUsage: '{size} used in {path}', mediaUsageUnknown: 'Stored in {path}',
+    mediaLocalAudio: 'Local audio', mediaLocalVideo: 'Local video', mediaReveal: 'Show in folder', mediaRemove: 'Remove', mediaNotSaved: 'Not saved locally', mediaTooLarge: '{size} is over the limit, so it was not saved', mediaNotHere: 'Not saved on this device',
+    mediaRemoveTitle: 'Remove this media file?', mediaRemoveBody: 'The file moves to the trash and can be restored. The note and transcript stay, and playback goes online.', mediaRemoveOk: 'Move to trash',
+    delMediaTitle: 'Remove the media files too?', delMediaBody: 'This bookmark has {count} local media files, {size} in total. They move to the trash and can be restored.', delMediaOk: 'Remove them', delMediaKeep: 'Keep files',
+    libStorage: 'Storage', storageTitle: 'Storage', storageSum: '{size} used · {count} items · {path}', storageEmpty: 'No media files saved yet.', storageVideo: 'Video', storageAudio: 'Audio', storageImage: 'Images',
+    storageLargest: 'Largest', storageOldest: 'Oldest viewed', storageUnopened: 'Unopened', storageNone: 'No matching files.', storageOrphan: 'Not linked to a bookmark', storageImages: '{count} images', storageNever: 'Not opened', storageDays: 'Viewed {count} days ago', storageToday: 'Viewed today',
+    storageSelected: '{count} selected · {size}. Notes and transcripts stay, and files can be restored from the trash', storageHint: 'Select files to clean up. Notes and transcripts stay.', storageTrash: 'Move to trash', storageNoTrash: 'This device has no trash to move files to.', storageFailed: '{count} files could not be removed.', storageLoading: 'Measuring…', storageUnknown: 'Size unknown',
     setAutoLabel: 'Enhanced auto mode',
     setAutoDesc: 'When a link arrives on its own in any Tangu chat and the intent is unambiguous, file it straight into the vault instead of asking first',
     tplGeneral: 'General', tplAcademic: 'Academic', tplInterview: 'Interview', tplPodcast: 'Podcast', tplMeeting: 'Meeting',
@@ -342,10 +358,11 @@ const detailLabel = (k) => (DETAIL_KEY[k] ? t(DETAIL_KEY[k]) : '')
 /** 设置项:宿主 registerSetting 是**同 key 覆盖**(pluginStore.registerSetting 按 pluginId+key 先 filter 再 append),
  *  所以切语言时原地重注册一次即可就地换语言,顺序也不变(宿主自动的「工作文件夹」行仍在最前)。
  *  ⚠️ 命令面板 / 视图标签页没有这个待遇 —— 那两处是直接 append 不去重,重注册会长出重复项,别照抄。 */
+const DEFAULT_MAX_MB = 500
 function registerSettings() {
   ctx.registerSetting({ key: 'defaultTemplate', label: t('setTplLabel'), type: 'text', default: '通用', description: t('setTplDesc') })
   ctx.registerSetting({ key: 'detail', label: t('setDetailLabel'), type: 'text', default: 'standard', description: t('setDetailDesc') })
-  ctx.registerSetting({ key: 'saveMedia', label: t('setMediaLabel'), type: 'boolean', default: true, description: t('setMediaDesc') })
+  ctx.registerSetting({ key: 'maxFileMb', label: t('setMediaCapLabel'), type: 'number', default: DEFAULT_MAX_MB, min: 1, description: t('setMediaCapDesc') })
   ctx.registerSetting({ key: 'autoSave', label: t('setAutoLabel'), type: 'boolean', default: false, description: t('setAutoDesc') })
 }
 registerSettings()
@@ -361,12 +378,17 @@ try {
 
 const getSetting = (k, d) => { try { return localStorage.getItem(`plugin.${PLUGIN_ID}.${k}`) || d } catch { return d } }
 
-/** 素材存档目录(绝对路径),关了开关 / 云端库 / 没开库 → null(退回外链,笔记照样成立)。
- *  ⚠️默认开 → 宿主在「值=默认」时会把键删掉,所以判据是 `!== 'false'` 而不是 `=== 'true'`。
+/** 保存档位。旧版开关关着的等于「不保存」;用户没选过就不写回,升级不改用户设过的值。 */
+const MEDIA_LEVELS = ['none', 'audio', 'video']
+function mediaLevel() {
+  const level = getSetting('mediaLevel', '')
+  return MEDIA_LEVELS.includes(level) ? level : getSetting('saveMedia', 'true') === 'false' ? 'none' : 'audio'
+}
+const maxFileMb = () => { const mb = Number(getSetting('maxFileMb', DEFAULT_MAX_MB)); return mb > 0 ? mb : DEFAULT_MAX_MB }
+/** 素材存档目录(绝对路径),云端库 / 没开库 → null(退回外链,笔记照样成立)。「不保存」档也要目录:封面不计入档位。
  *  ⚠️每次跑现算,不缓存:运行时可以切库,`vaultRoot()` 是渲染进程 store 的当下值。 */
 const ASSETS_SUBDIR = 'assets'
 function mediaSaveDir() {
-  if (getSetting('saveMedia', 'true') === 'false') return null
   if (ctx.app && typeof ctx.app.hostPath === 'function') return ctx.app.hostPath(`${folderRoot()}/${ASSETS_SUBDIR}`)
   // Older desktop hosts have a real local vault path. A browser projection must use the
   // explicit host mapping: its vault and its execution engine may be on different devices.
@@ -385,6 +407,80 @@ function archivedAssetUrl(name) {
   const tg = globalThis.window && window.tangu
   if (tg && (tg.unitPage || tg.cloudWeb)) return ''
   return `amadeus-asset://v/${encodeURIComponent(path)}`
+}
+
+const fmtBytes = (n) => n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= 1048576 ? `${(n / 1048576).toFixed(n >= 104857600 ? 0 : 1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+const assetKind = (name) => /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : /\.(mp3|wav|ogg|m4a|flac|aac|opus)$/i.test(name) ? 'audio' : 'image'
+/** 资源协议的响应头里就有大小,不用读文件。→ {bytes} / {missing:true} / null(不知道,不能当成没有)。 */
+async function assetSize(name) {
+  const url = archivedAssetUrl(name), controller = new AbortController()
+  if (!url) return null
+  try {
+    const res = await fetch(url, { signal: controller.signal }), bytes = Number(res.headers.get('content-length'))
+    controller.abort()
+    return res.status === 404 ? { missing: true } : res.ok && bytes > 0 ? { bytes } : null
+  } catch { return null }
+}
+/** 收藏夹 assets 里的媒体文件名;宿主给不了清单时回 null。封面是条目自带的,不算要管的媒体。 */
+async function assetNames() {
+  if (typeof ctx.app?.listFiles !== 'function') return null
+  const prefix = `${folderRoot()}/${ASSETS_SUBDIR}/`
+  return (await ctx.app.listFiles()).filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/') && !/-cover\.jpg$/i.test(p)).map((p) => p.slice(prefix.length))
+}
+const embeddedAssets = (summary) => [...String(summary || '').matchAll(/!\[\[([^\]|#]+)/g)].map((m) => m[1].split('/').pop())
+const openedKey = () => `plugin.${PLUGIN_ID}.openedAt`
+function openedMap() { try { return JSON.parse(localStorage.getItem(openedKey()) || '{}') || {} } catch { return {} } }
+function markOpened(id) { try { localStorage.setItem(openedKey(), JSON.stringify({ ...openedMap(), [id]: Date.now() })) } catch { /* 只影响排序 */ } }
+/** 按收藏聚合媒体文件。同一份文件可能被重新整理出的两条收藏共用,所以 entries 是数组。 */
+async function mediaGroups() {
+  const names = await assetNames()
+  if (!names) return null
+  const owners = new Map(), opened = openedMap()
+  for (const item of (await readIndex()).items || []) {
+    const entry = await loadEntry(item.id).catch(() => null)
+    for (const name of embeddedAssets(entry?.summaryMarkdown)) owners.set(name, [...(owners.get(name) || []), item])
+  }
+  const groups = new Map()
+  for (const name of names) {
+    const entries = owners.get(name) || [], key = entries[0]?.id || `file:${name}`
+    if (!groups.has(key)) groups.set(key, { key, title: entries[0]?.title || name, platform: entries[0]?.platform || '', linked: entries.length > 0, entries: [], files: [], openedAt: 0, bytes: 0, unknown: 0 })
+    const group = groups.get(key)
+    group.files.push(name)
+    group.entries = [...new Set([...group.entries, ...entries.map((e) => e.id)])]
+    group.openedAt = Math.max(group.openedAt, ...entries.map((e) => opened[e.id] || 0), 0)
+  }
+  const pending = names.slice()
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    for (let name = pending.shift(); name; name = pending.shift()) {
+      const group = [...groups.values()].find((g) => g.files.includes(name)), size = await assetSize(name)
+      if (size?.bytes) group.bytes += size.bytes; else group.unknown++
+    }
+  }))
+  return [...groups.values()]
+}
+async function trashAssets(names) {
+  let failed = 0
+  for (const name of names) await ctx.app.trash(assetVaultRel(name)).catch(() => { failed++ })
+  if (failed) say(t('storageFailed', { count: failed }), { level: 'warning' })
+  return failed
+}
+
+function openStorage() { pendingOpen = { storage: true }; bus.emit({ type: 'open', storage: true }); ctx.openView('folder') }
+/** 三段选择宿主的设置表画不了,自绘一块放在设置表下方。 */
+function mountMediaSettings(el) {
+  const style = document.createElement('style')
+  style.textContent = '.bb-set{display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--text)}.bb-set-row{display:flex;gap:18px;align-items:flex-start;justify-content:space-between}.bb-set-row>div:first-child{flex:1;min-width:0}.bb-set p{margin:2px 0 0;font-size:12px;color:var(--text-faint);line-height:1.5}.bb-seg{display:inline-flex;gap:2px;padding:2px;border-radius:6px;background:var(--overlay-light);flex:none}.bb-seg button{height:26px;padding:0 11px;border:0;border-radius:4px;background:none;font:inherit;color:var(--text-muted);cursor:pointer;white-space:nowrap}.bb-seg button.on{background:var(--bg-card);color:var(--text);font-weight:500}.bb-set-manage{height:28px;padding:0 10px;border:0;border-radius:6px;background:var(--overlay-light);font:inherit;color:var(--text);cursor:pointer}'
+  const path = `${folderRoot()}/${ASSETS_SUBDIR}`
+  const box = document.createElement('div'); box.className = 'bb-set'
+  box.innerHTML = `<div class="bb-set-row"><div><div>${t('mediaLevelLabel')}</div><p>${t('mediaLevelDesc')}</p></div><div class="bb-seg">${MEDIA_LEVELS.map((level) => `<button data-level="${level}">${t(level === 'none' ? 'mediaNone' : level === 'audio' ? 'mediaAudio' : 'mediaVideo')}</button>`).join('')}</div></div>
+<div class="bb-set-row"><div><div>${t('storageTitle')}</div><p data-usage></p></div><button class="bb-set-manage" data-manage>${t('mediaManage')}</button></div>`
+  el.replaceChildren(style, box)
+  const usage = box.querySelector('[data-usage]'); usage.textContent = t('mediaUsageUnknown', { path })
+  const paint = () => box.querySelectorAll('[data-level]').forEach((b) => b.classList.toggle('on', b.dataset.level === mediaLevel()))
+  box.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => { try { localStorage.setItem(`plugin.${PLUGIN_ID}.mediaLevel`, b.dataset.level) } catch { /* 下次读到旧值 */ } paint() }))
+  box.querySelector('[data-manage]').addEventListener('click', openStorage)
+  paint()
+  void mediaGroups().then((groups) => { if (groups && usage.isConnected) usage.textContent = t('mediaUsage', { size: fmtBytes(groups.reduce((sum, g) => sum + g.bytes, 0)), path }) }).catch(() => {})
 }
 
 // ── 增强自动模式:把开关镜像进 vault 的一个小文件 ─────────────────────────────
@@ -1381,7 +1477,7 @@ async function qRun(it, reconnect = false) {
   }
   const onTick = full => { const p=parseAgentOutput(full); it.summary=p.summary || full; bus.emit({ type:'run-delta',id:it.id }) }
   const spec=outSpec(it), saveDir=isMusic(it.plat.platform) ? null : mediaSaveDir()
-  const archive = saveDir ? `Pass --save-to ${JSON.stringify(saveDir)} to transcribe.py. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists.` : ''
+  const archive = saveDir ? `Pass --save-to ${JSON.stringify(saveDir)} --media ${mediaLevel()} --max-mb ${maxFileMb()} to transcribe.py and run it with timeout_ms 1800000, because saving media can take minutes. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists. Copy the script's meta object into your block unchanged, including mediaSkipped when present.` : ''
   const message = `Use the bundled Bluebird video analysis skill with host run_bash. Analyze this source: ${it.url}
 Default template: ${tplLabel(it.tpl)}. Default detail: ${it.detail}.
 ${taskInstructions(it)}
@@ -1581,6 +1677,15 @@ const STYLE = `
 .bb-native .bb-body{display:flex;flex-direction:column;gap:12px;overflow:hidden;padding:12px}
 .bb-native-stage{min-height:0;display:flex;flex:1;flex-direction:column;justify-content:center;gap:12px}
 .bb-native .bb-media{width:100%;max-height:min(58vh,540px);flex:0 1 auto}
+.bb-media-strip{display:flex;align-items:center;gap:6px;min-height:36px;padding:2px 4px 2px 12px;background:var(--bb-surf);border:1px solid var(--bb-border-sub);border-radius:12px;color:var(--bb-text-muted);font-size:12.5px}
+.bb-store{max-width:680px;margin:0 auto;padding:6px 4px 12px;display:flex;flex-direction:column;gap:12px;height:100%;box-sizing:border-box}
+.bb-store-bar{display:flex;gap:2px;height:6px;border-radius:3px;overflow:hidden}.bb-store-bar i{display:block;background:var(--accent,var(--bb-text))}.bb-store-bar i:nth-child(2){opacity:.5}.bb-store-bar i:nth-child(3){opacity:.22}
+.bb-store-legend{display:flex;gap:14px;font-size:12px;color:var(--bb-text-muted)}.bb-store-legend b{font-weight:500;color:var(--bb-text)}
+.bb-store-tabs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;border-radius:6px;background:var(--overlay-light)}.bb-store-tabs button{height:26px;padding:0 11px;border:0;border-radius:4px;background:none;font:inherit;font-size:13px;color:var(--bb-text-muted);cursor:pointer}.bb-store-tabs button.on{background:var(--bb-surf);color:var(--bb-text);font-weight:500}
+.bb-store-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:1px}
+.bb-store-row{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;cursor:pointer}.bb-store-row.on{background:var(--overlay-light)}.bb-store-row input{flex:none;margin:0}
+.bb-store-text{flex:1;min-width:0}.bb-store-title{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bb-store-size{font-size:13px;color:var(--bb-text-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bb-store-foot{display:flex;align-items:center;gap:8px;font-size:12px}
 .bb-native-note{padding:12px 13px;background:var(--bb-surf);border:1px solid var(--bb-border-sub);border-radius:12px}
 .bb-native-note strong{display:block;margin-bottom:3px;font-size:12.5px;font-weight:600;color:var(--bb-text)}
 .bb-native-note span{display:block;color:var(--bb-text-muted);font-size:11.5px}
@@ -1907,8 +2012,92 @@ function mountAnalyze(el, viewCtx) {
     }
   }
 
+  /** 播放器下面一行:这条有没有本地文件、多大,能不能移除。文件被移走后退回在线播放。 */
+  async function renderMediaStrip(strip, media, meta) {
+    const name = archivedMediaName(view.summary), current = view
+    if (!strip) return
+    const size = name ? await assetSize(name) : null
+    if (view !== current || !strip.isConnected) return
+    if (size?.missing) { current.mediaGone = true; renderMedia(media, meta) }
+    const local = name && !size?.missing
+    const canKeep = !!mediaSaveDir()
+    const text = document.createElement('span')
+    text.textContent = local ? [t(assetKind(name) === 'video' ? 'mediaLocalVideo' : 'mediaLocalAudio'), size?.bytes ? fmtBytes(size.bytes) : ''].filter(Boolean).join(' · ')
+      : meta.mediaSkipped ? t('mediaTooLarge', { size: fmtBytes(Number(meta.mediaSkipped)) }) : t(canKeep ? 'mediaNotSaved' : 'mediaNotHere')
+    strip.replaceChildren(text)
+    if (!local) return
+    const spacer = document.createElement('span'); spacer.style.flex = '1'; strip.appendChild(spacer)
+    const button = (label, run) => { const b = document.createElement('button'); b.className = 'bb-btn ghost sm'; b.textContent = label; b.addEventListener('click', run); strip.appendChild(b) }
+    if (ctx.app.reveal) button(t('mediaReveal'), () => ctx.app.reveal(assetVaultRel(name)))
+    if (ctx.app.trash) button(t('mediaRemove'), async () => {
+      const ok = ctx.ui?.confirm ? await ctx.ui.confirm({ title: t('mediaRemoveTitle'), body: t('mediaRemoveBody'), ok: t('mediaRemoveOk'), danger: true }) : true
+      if (!ok || await trashAssets([name])) return
+      current.mediaGone = true
+      if (view === current) { renderMedia(media, meta); void renderMediaStrip(strip, media, meta) }
+    })
+  }
+
+  function renderStorageList(host, groups, state) {
+    const rows = groups.filter((g) => state.sort !== 'unopened' || !g.openedAt)
+      .sort((a, b) => state.sort === 'largest' ? b.bytes - a.bytes : a.openedAt - b.openedAt)
+    const opened = (g) => !g.linked ? t('storageOrphan') : !g.openedAt ? t('storageNever') : (() => { const days = Math.floor((Date.now() - g.openedAt) / 86400000); return days ? t('storageDays', { count: days }) : t('storageToday') })()
+    const kind = (g) => { const video = g.files.find((f) => assetKind(f) === 'video'), audio = g.files.find((f) => assetKind(f) === 'audio'); return video ? t('storageVideo') : audio ? t('storageAudio') : t('storageImages', { count: g.files.length }) }
+    host.replaceChildren(...rows.map((g) => {
+      const row = document.createElement('label'); row.className = 'bb-store-row' + (state.selected.has(g.key) ? ' on' : '')
+      const check = document.createElement('input'); check.type = 'checkbox'; check.checked = state.selected.has(g.key); check.disabled = !ctx.app.trash
+      check.addEventListener('change', () => { if (check.checked) state.selected.add(g.key); else state.selected.delete(g.key); state.refresh() })
+      const text = document.createElement('div'); text.className = 'bb-store-text'
+      const title = document.createElement('div'); title.className = 'bb-store-title'; title.textContent = g.title
+      const sub = document.createElement('div'); sub.className = 'bb-muted'; sub.textContent = [kind(g), g.platform ? platLabel(g.platform) : '', opened(g)].filter(Boolean).join(' · ')
+      text.append(title, sub)
+      const size = document.createElement('div'); size.className = 'bb-store-size'; size.textContent = g.bytes ? fmtBytes(g.bytes) : t('storageUnknown')
+      row.append(check, text, size)
+      return row
+    }))
+    if (!rows.length) { const empty = document.createElement('div'); empty.className = 'bb-muted'; empty.textContent = t(groups.length ? 'storageNone' : 'storageEmpty'); host.replaceChildren(empty) }
+  }
+
+  /** 存储页:和收藏页同一个主窗格。只动 assets 里的文件,笔记和字幕不碰。 */
+  async function renderStorage() {
+    view = null; cur = { kind: 'storage' }
+    root.innerHTML = `
+<div class="bb-app bb-native">
+  <div class="bb-hdr"><button class="bb-btn ghost sm" data-back title="${t('back')}">←</button><div class="bb-native-title"><div style="font-weight:600">${t('storageTitle')}</div></div></div>
+  <div class="bb-body"><div class="bb-store"><div class="bb-muted" data-store-sum>${t('storageLoading')}</div></div></div>
+</div>`
+    root.querySelector('[data-back]').addEventListener('click', renderHome)
+    const groups = await mediaGroups().catch(() => null), box = root.querySelector('.bb-store')
+    if (cur.kind !== 'storage' || !box) return
+    if (!groups) { box.querySelector('[data-store-sum]').textContent = t('storageNoTrash'); return }
+    const total = groups.reduce((sum, g) => sum + g.bytes, 0), byKind = { video: 0, audio: 0, image: 0 }
+    for (const g of groups) byKind[assetKind(g.files.find((f) => assetKind(f) !== 'image') || g.files[0])] += g.bytes
+    box.querySelector('[data-store-sum]').textContent = t('storageSum', { size: fmtBytes(total), count: groups.length, path: `${folderRoot()}/${ASSETS_SUBDIR}` })
+    const legend = (kind, label) => byKind[kind] ? `<span><b>${fmtBytes(byKind[kind])}</b> ${t(label)}</span>` : ''
+    box.insertAdjacentHTML('beforeend', `<div class="bb-store-bar">${['video', 'audio', 'image'].map((k) => byKind[k] ? `<i style="flex:${byKind[k]}"></i>` : '').join('')}</div>
+<div class="bb-store-legend">${total ? legend('video', 'storageVideo') + legend('audio', 'storageAudio') + legend('image', 'storageImage') : ''}</div>
+<div class="bb-store-tabs">${[['largest', 'storageLargest'], ['oldest', 'storageOldest'], ['unopened', 'storageUnopened']].map(([k, l]) => `<button data-sort="${k}">${t(l)}</button>`).join('')}</div>
+<div class="bb-store-list" data-store-list></div>
+<div class="bb-store-foot"><span class="bb-muted" data-store-state></span><span style="flex:1"></span><button class="bb-btn primary sm" data-store-trash>${t('storageTrash')}</button></div>`)
+    const list = box.querySelector('[data-store-list]'), trash = box.querySelector('[data-store-trash]'), note = box.querySelector('[data-store-state]')
+    const state = { sort: 'largest', selected: new Set(), refresh() {
+      const chosen = groups.filter((g) => state.selected.has(g.key))
+      note.textContent = !ctx.app.trash ? t('storageNoTrash') : chosen.length ? t('storageSelected', { count: chosen.length, size: fmtBytes(chosen.reduce((sum, g) => sum + g.bytes, 0)) }) : t('storageHint')
+      trash.style.display = ctx.app.trash ? '' : 'none'; trash.disabled = !chosen.length
+      box.querySelectorAll('[data-sort]').forEach((b) => b.classList.toggle('on', b.dataset.sort === state.sort))
+      renderStorageList(list, groups, state)
+    } }
+    box.querySelectorAll('[data-sort]').forEach((b) => b.addEventListener('click', () => { state.sort = b.dataset.sort; state.refresh() }))
+    trash.addEventListener('click', async () => {
+      const chosen = groups.filter((g) => state.selected.has(g.key)), size = fmtBytes(chosen.reduce((sum, g) => sum + g.bytes, 0))
+      if (ctx.ui?.confirm && !await ctx.ui.confirm({ title: t('mediaRemoveTitle'), body: t('storageSelected', { count: chosen.length, size }), ok: t('storageTrash'), danger: true })) return
+      await trashAssets(chosen.flatMap((g) => g.files))
+      void renderStorage()
+    })
+    state.refresh()
+  }
+
   function renderMedia(media, meta) {
-    const localName = archivedMediaName(view.summary)
+    const localName = view.mediaGone ? null : archivedMediaName(view.summary)
     if (localName) {
       const player = document.createElement(/\.(mp4|webm|mov|m4v)$/i.test(localName) ? 'video' : 'audio')
       player.controls = true; player.preload = 'metadata'; player.src = archivedAssetUrl(localName)
@@ -1933,9 +2122,11 @@ function mountAnalyze(el, viewCtx) {
     seekHandler = seek
     if (view.plat.embed) { const f = document.createElement('iframe'); f.src = view.plat.embed(0); f.allow = 'autoplay; fullscreen'; media.appendChild(f); return }
     media.innerHTML = ''
+    // 本地封面优先:平台封面地址带时效。文件名规则见 transcribe.py archive_cover。
+    const localCover = meta.videoId ? archivedAssetUrl(`bluebird-${String(meta.videoId).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 60)}-cover.jpg`) : ''
     const thumb = safeHref(meta.thumbnail || '')
-    const hasThumb = /^https:/i.test(thumb)
-    if (hasThumb) { const img = document.createElement('img'); img.className = 'bb-thumb'; img.src = thumb; img.addEventListener('error', () => img.remove()); media.appendChild(img) }
+    const hasThumb = /^https:/i.test(thumb) || !!localCover
+    if (hasThumb) { const img = document.createElement('img'); img.className = 'bb-thumb'; img.src = localCover || thumb; img.addEventListener('error', () => { if (localCover && /^https:/i.test(thumb) && img.src !== thumb) img.src = thumb; else img.remove() }); media.appendChild(img) }
     const ph = document.createElement('div'); ph.className = 'bb-ph' + (hasThumb ? ' ov' : '')
     const icon = document.createElement('div'); icon.style.fontSize = '28px'; icon.textContent = '▶'
     const lab = document.createElement('div'); lab.textContent = view.plat.platform ? platLabel(view.plat.platform) : t('linkLabel')
@@ -1969,6 +2160,7 @@ function mountAnalyze(el, viewCtx) {
     </div>
     <div class="bb-native-stage">
       <div class="bb-media" data-media></div>
+      ${view.kind === 'link' ? '' : '<div class="bb-media-strip" data-media-strip></div>'}
       <div class="bb-native-note">
         <strong data-native-note></strong>
         <span>${t('nativeChatHint')}</span>
@@ -1986,6 +2178,7 @@ function mountAnalyze(el, viewCtx) {
     $('[data-export]').addEventListener('click', (e) => exportMenu(e.currentTarget))
     $('[data-log]')?.addEventListener('click',()=>showTaskLog(view.runId || view.analysis?.taskId))
     renderMedia($('[data-media]'), meta)
+    void renderMediaStrip($('[data-media-strip]'), $('[data-media]'), meta)
     if (errText) {
       const box = $('[data-prog]'); box.style.display = ''; box.classList.add('err'); $('[data-status]').textContent = t('failedPrefix', { msg: errText })
       const actions=document.createElement('div');actions.className='bb-row';actions.style.marginTop='12px'
@@ -2207,6 +2400,7 @@ function mountAnalyze(el, viewCtx) {
   }
 
   async function openSaved(id, options = {}) {
+    if (!options.playbackOnly) markOpened(id)
     const generation = ++openGeneration
     const requestedScope = playbackScope()
     if (options.playbackOnly && mediaScope === requestedScope && cur.kind === 'entry' && cur.id === id && seekHandler) { seekHandler(options.at); return }
@@ -2232,7 +2426,7 @@ function mountAnalyze(el, viewCtx) {
   }
 
   // ── 总线消费:library 打开请求 / 队列变更 / 直播 token ──
-  const consume = (e) => { if (!e || (e.scope && e.scope !== playbackScope())) return; if (e.fresh) renderHome(); else if (e.entryId) openSaved(e.entryId, e) }
+  const consume = (e) => { if (!e || (e.scope && e.scope !== playbackScope())) return; if (e.fresh) renderHome(); else if (e.storage) renderStorage(); else if (e.entryId) openSaved(e.entryId, e) }
   const playbackTarget = { get scope() { return playbackScope() }, native: nativeWorkbench, entryId: () => mediaScope === playbackScope() && cur.kind === 'entry' ? cur.id : null,
     visible: () => root.isConnected && root.getClientRects().length > 0, open: ref => openSaved(ref.entryId, { ...ref, playbackOnly: true }) }
   playbackTargets.add(playbackTarget)
@@ -2271,6 +2465,7 @@ function mountAnalyze(el, viewCtx) {
     const snap = snapshotStage(root, cur.kind === 'home' ? 'home' : 'detail')
     if (cur.kind === 'run') { const it = qFind(cur.id); if (it) { renderRun(it); restoreStage(root, snap); return } }
     else if (cur.kind === 'entry' && view) { renderDetail(false); restoreStage(root, snap); return }
+    else if (cur.kind === 'storage') { void renderStorage(); return }
     renderHome(); restoreStage(root, snap); if (homeCheck) homeCheck()
   }
   const offLocale = ctx.subscribeLocale ? ctx.subscribeLocale(() => repaint()) : null
@@ -2318,6 +2513,7 @@ function mountLog(el) {
 //    两个例外,下面订了语言就地更新:状态栏有 update() 句柄;设置项是**同 key 覆盖**,重注册一次即可。
 // workspaceSource(2026-08-25 宿主 P2):folder/library 做主视图时,统一工作区左栏自动切到下面的
 // 收藏条目列表源(仅在左栏是统一 workspace 视图的 Space 生效;青鸟自己的 Space 左栏=完整 library 面,不受影响)。
+ctx.registerSettingsView?.({ id: 'media', title: () => t('mediaLevelLabel'), mount: mountMediaSettings })
 ctx.registerView({ id: 'folder', title: t('viewFolder'), mount: mountAnalyze, singleton: true, workspaceSource: 'library-list', mainCompanions:[{type:'amadeus-editor',key:'bluebird-document',split:'right'},{type:'chat-panel',key:'bluebird-chat',split:'down',params:{autoRefFromMain:true}}] })
 ctx.registerView({id:'analysis-log',title:t('logTitle'),icon:'list-tree',mount:mountLog,singleton:true})
 // 统一左栏列表源(宿主 2026-08-25+ 才有;老宿主可选调用即静默跳过):收藏条目的**平面投影**——
@@ -2373,7 +2569,7 @@ if (ctx.registerListSource) {
       if (c[NONE]) out.push({ key: NONE, title: t('libNone'), count: c[NONE] })
       return out
     },
-    actions: [{ id: 'new', label: t('libNew'), run: () => { pendingOpen = { fresh: true }; bus.emit({ type: 'open', fresh: true }); ctx.openView('folder') } }],
+    actions: [{ id: 'new', label: t('libNew'), run: () => { pendingOpen = { fresh: true }; bus.emit({ type: 'open', fresh: true }); ctx.openView('folder') } }, { id: 'storage', label: t('libStorage'), run: openStorage }],
     groupActions: [{
       id: 'new-folder',
       label: t('promptNewFolder'),
@@ -2396,9 +2592,16 @@ if (ctx.registerListSource) {
         await writeIndex(idx); await listReload(); bus.emit({ type: 'saved' })
       })() } },
       { id: 'delete', label: t('menuDelete'), run: () => { void (async () => {
+        const groups = ctx.app.trash && ctx.ui?.confirm ? await mediaGroups().catch(() => null) : null
+        const group = (groups || []).find((g) => g.entries.includes(item.key))
+        // 别的收藏还在用的文件不问也不动。只问文件,收藏本身照常删。
+        const files = group && group.entries.length === 1 ? group.files : []
+        const removeFiles = files.length > 0 && await ctx.ui.confirm({ title: t('delMediaTitle'), body: t('delMediaBody', { count: files.length, size: fmtBytes(group.bytes) }), ok: t('delMediaOk'), cancel: t('delMediaKeep') })
         const idx = await readIndex()
         idx.items = (idx.items || []).filter((x) => x.id !== item.key)
-        await writeIndex(idx); await listReload(); bus.emit({ type: 'saved' })
+        await writeIndex(idx)
+        if (removeFiles) await trashAssets(files)
+        await listReload(); bus.emit({ type: 'saved' })
       })() } },
     ],
     // ⚠️订阅时**必重读一次**:插件是在宿主**启动期**激活的(bootstrapEngine 装插件),而 vault 根的
@@ -2423,7 +2626,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry, hasSpeech, transcriptPrompt })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry, hasSpeech, transcriptPrompt, mediaLevel, maxFileMb, fmtBytes, assetKind, embeddedAssets, mediaGroups })
   Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
