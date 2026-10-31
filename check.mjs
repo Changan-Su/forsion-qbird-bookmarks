@@ -288,6 +288,9 @@ A.equal(T.extractUrl('标题 http://xhslink.com/a/abc,复制本条信息,打开�
 A.equal(T.extractUrl('https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=\\&xsec_source=app_share'), 'https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=&xsec_source=app_share')
 A.equal(T.extractUrl('[链接](https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=)'), 'https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=')
 A.equal(T.isSupported('https://xhslink.cn/o/2Ez33pZrosk'), true)
+// 链接路径里的中文和成对括号要留着,否则丢歌曲 id
+A.equal(T.extractUrl('听这首 https://music.apple.com/cn/song/晴天/123456789 不错'), 'https://music.apple.com/cn/song/晴天/123456789')
+A.equal(T.extractUrl('https://github.com/a/b/blob/main/note(1).md'), 'https://github.com/a/b/blob/main/note(1).md')
 A.equal(T.parsePlatform('https://xhslink.cn/o/2Ez33pZrosk').platform, 'xiaohongshu')
 
 // 拆 Agent 产出:剥掉 bluebird 数据块

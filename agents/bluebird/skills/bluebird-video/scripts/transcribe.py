@@ -395,7 +395,7 @@ def build_meta(info, fallback_url):
         "webpageUrl": str(info.get("webpage_url") or fallback_url).strip(),
         "thumbnail": str(info.get("thumbnail") or "").strip(),
         # 作者写的正文:短视频常常只有 BGM,这是唯一的文字内容
-        "description": str(info.get("description") or "").strip()[:2000],
+        "description": str(info.get("description") or "").strip(),
     }
 
 

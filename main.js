@@ -491,9 +491,12 @@ const SUPPORTED = /(?:youtu\.?be|youtube\.com|bilibili\.com|b23\.tv|xiaohongshu\
 /** 从分享文本里抠出第一条支持的链接(粘一整段分享文案也能识别)。 */
 function extractUrl(text) {
   // 分享文案常把中文标点直接贴在链接后面;Markdown 复制来的链接把 & 转义成 \&。
-  const c = '[^\\s\\]()"\'<>，。！？、；：（）《》【】「」\\u4e00-\\u9fff]'
+  // 中文不算分隔符:Apple Music 的路径里就有歌名。
+  const c = '[^\\s\\]"\'<>，。！？、；：（）《》【】「」]'
   const m = String(text || '').match(new RegExp(`https?:\\/\\/${c}*${SUPPORTED.source}${c}*`, 'i'))
-  return m ? m[0].replace(/\\&/g, '&').replace(/[,.;!?]+$/, '') : String(text || '').trim()
+  if (!m) return String(text || '').trim()
+  const url = m[0].replace(/\\&/g, '&').replace(/,[一-鿿].*$/, '').replace(/[,.;!?]+$/, '')
+  return url.includes('(') ? url : url.replace(/\)+$/, '')
 }
 const isSupported = (url) => SUPPORTED.test(String(url || ''))
 

@@ -81,6 +81,8 @@ Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-r
 - 在线视频抓取需要网络、Tangu 与 yt-dlp;音频转写是否需要云端 key 取决于宿主选用的本地模型或云供应商。仅收藏链接和阅读已有记录不依赖这些能力。
 - 超长视频的 ASR 分片并发(Bluebird 原有能力)本版未做,原生字幕无此限制。
 - 小红书等平台随 yt-dlp 支持度变化,抓取失败先升级 yt-dlp。
+- 小红书链接要保留 `xsec_token`,过期后重新分享。抖音只支持视频链接,图集暂不支持。
+- 真实链接验收:`harness/retrieval.live.py --url <链接>`;真实窗口验收:`node harness/media.e2e.cjs`。
 
 版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
