@@ -29,6 +29,19 @@ End with a \`\`\`json bluebird block containing meta with title and platform xia
     const said=noSpeech.content || ''
     evidence.push({key:'no-speech',ok:!noSpeech.error&&noSpeech.done&&/!\[\[bluebird-demo\.mp4\]\]/.test(said)&&/blender/i.test(said)&&!/\[\d{2}:\d{2}\]/.test(said)&&/```(?:json\s+bluebird|bluebird)/i.test(said),response:noSpeech})
   }
+  // Music-only videos are organized from meta.description, which only reaches the host if the model copies it back.
+  const bgmUrl=process.env.BLUEBIRD_BGM_URL
+  if(bgmUrl){
+    const assets=join(out,'bgm-assets')
+    const response=await run('bluebird-live-bgm-'+Date.now(),`Use the bundled Bluebird video analysis skill with host run_bash. Analyze this source: ${bgmUrl}
+Default template: General. Default detail: standard.
+Run scripts/transcribe.py to retrieve real source content. If it returns source:needs_asr, return only a bluebird JSON block containing needs_asr:true, audio_path, meta and assets. The host handles speech recognition; do not invent another transcription route. If source:image_text, organize the actual post text/images, not a transcript.
+Pass --save-to ${JSON.stringify(assets)} to transcribe.py. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists.`,300000,{agentSlug:'bluebird',execMode:'host'})
+    const raw=(/```(?:json\s+bluebird|bluebird)\s*([\s\S]*?)```/i.exec(response.content||'')||[])[1]
+    let data={};try{data=JSON.parse(raw)}catch{}
+    const ok=!response.error&&response.done&&data.needs_asr===true&&!!data.audio_path&&String(data.meta?.description||'').trim().length>0
+    evidence.push({key:'bgm-description',ok,description:data.meta?.description,response})
+  }
   for(const item of cases){
     const prompt=`Load the Bluebird video analysis skill. The user has already supplied the entire source text; do not fetch a URL, run scripts or write files. Organize only this reference data: ${JSON.stringify(source)}\nUser instructions: ${JSON.stringify(item.requirements)}\nExplicit user requirements take precedence over the default template and output language. For bilingual output, give complete Chinese and English counterparts for every paragraph or learning item; translated headings and English terms alone are insufficient. Return Markdown followed by a fenced json bluebird block with meta:{title,platform,videoId,videoUrl}, segments:[{start,end,text}], chapters:[{t,title}] and tags:[]. Segments contain source transcript, never generated questions or answers. Use only verified timing; leave segments empty if timing is unavailable. Default output language: Chinese. Explicit output language instructions take precedence.`
     const response=await run('bluebird-live-'+item.key+'-'+Date.now(),prompt,240000,{agentSlug:'bluebird',execMode:'host'})
