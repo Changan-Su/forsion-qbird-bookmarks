@@ -89,6 +89,16 @@ async function main(){
   await win.click('#set [data-level="video"]')
   check('choosing a level persists',await win.evaluate(()=>localStorage.getItem('plugin.bluebird.mediaLevel')==='video'))
   await shot('settings')
+  // Settings is a separate window with its own plugin instance; Manage must still reach the main window.
+  await win.evaluate(()=>{document.getElementById('set').remove();__bb.ctx.app.openSettings('fplugin:bluebird')})
+  const settingsPage=await app.waitForEvent('window',{timeout:15000}).catch(()=>app.windows().at(-1))
+  await settingsPage.waitForSelector('.bb-set [data-manage]',{timeout:20000})
+  check('settings window shows the chosen level',await settingsPage.evaluate(()=>document.querySelector('.bb-set [data-level="video"]').classList.contains('on')))
+  await settingsPage.click('[data-manage]')
+  await win.waitForSelector('.bb-store',{timeout:15000})
+  check('manage in the settings window opens storage in the main window',true)
+  await settingsPage.waitForEvent('close',{timeout:5000}).catch(()=>{})
+  check('manage closes the settings window',settingsPage.isClosed())
  }finally{await app.close().catch(()=>{});stub.close?.();fs.rmSync(home,{recursive:true,force:true})}
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

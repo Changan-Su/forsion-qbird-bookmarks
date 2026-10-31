@@ -465,6 +465,7 @@ async function trashAssets(names) {
   return failed
 }
 
+const STORAGE_REQUEST_KEY = `plugin.${PLUGIN_ID}.openStorageAt`
 function openStorage() { pendingOpen = { storage: true }; bus.emit({ type: 'open', storage: true }); ctx.openView('folder') }
 /** 三段选择宿主的设置表画不了,自绘一块放在设置表下方。 */
 function mountMediaSettings(el) {
@@ -478,7 +479,12 @@ function mountMediaSettings(el) {
   const usage = box.querySelector('[data-usage]'); usage.textContent = t('mediaUsageUnknown', { path })
   const paint = () => box.querySelectorAll('[data-level]').forEach((b) => b.classList.toggle('on', b.dataset.level === mediaLevel()))
   box.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => { try { localStorage.setItem(`plugin.${PLUGIN_ID}.mediaLevel`, b.dataset.level) } catch { /* 下次读到旧值 */ } paint() }))
-  box.querySelector('[data-manage]').addEventListener('click', openStorage)
+  box.querySelector('[data-manage]').addEventListener('click', () => {
+    if (new URLSearchParams(location.search).get('window') !== 'floating') { openStorage(); return }
+    // ponytail: 宿主没给跨窗接口,先读它的 URL 约定;认不出就走上面的同窗路径。
+    try { localStorage.setItem(STORAGE_REQUEST_KEY, String(Date.now())) } catch { return }
+    window.close()
+  })
   paint()
   void mediaGroups().then((groups) => { if (groups && usage.isConnected) usage.textContent = t('mediaUsage', { size: fmtBytes(groups.reduce((sum, g) => sum + g.bytes, 0)), path }) }).catch(() => {})
 }
@@ -2513,7 +2519,10 @@ function mountLog(el) {
 //    两个例外,下面订了语言就地更新:状态栏有 update() 句柄;设置项是**同 key 覆盖**,重注册一次即可。
 // workspaceSource(2026-08-25 宿主 P2):folder/library 做主视图时,统一工作区左栏自动切到下面的
 // 收藏条目列表源(仅在左栏是统一 workspace 视图的 Space 生效;青鸟自己的 Space 左栏=完整 library 面,不受影响)。
-ctx.registerSettingsView?.({ id: 'media', title: () => t('mediaLevelLabel'), mount: mountMediaSettings })
+ctx.registerSettingsView?.({ id: 'media', mount: mountMediaSettings })
+// 设置在独立窗口里,那边的插件实例够不到主窗的视图;同源窗口之间只有 storage 事件是通的。
+const onStorageRequest = (e) => { if (e.key === STORAGE_REQUEST_KEY && e.newValue) openStorage() }
+globalThis.window?.addEventListener?.('storage', onStorageRequest)
 ctx.registerView({ id: 'folder', title: t('viewFolder'), mount: mountAnalyze, singleton: true, workspaceSource: 'library-list', mainCompanions:[{type:'amadeus-editor',key:'bluebird-document',split:'right'},{type:'chat-panel',key:'bluebird-chat',split:'down',params:{autoRefFromMain:true}}] })
 ctx.registerView({id:'analysis-log',title:t('logTitle'),icon:'list-tree',mount:mountLog,singleton:true})
 // 统一左栏列表源(宿主 2026-08-25+ 才有;老宿主可选调用即静默跳过):收藏条目的**平面投影**——
@@ -2631,6 +2640,7 @@ if (globalThis.__BLUEBIRD_TEST__) {
 }
 
 return () => { // 插件停用才断分析
+  globalThis.window?.removeEventListener?.('storage', onStorageRequest)
   pluginDisposed = true; document.removeEventListener?.('click',onDocumentClick,true);_layer?.remove?.();_layer=null;clearTimeout(runtimeTimer); void persistRuntime(true)
   if (sb && sb.dispose) sb.dispose()
   if (offLocaleTop) offLocaleTop()
