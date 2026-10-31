@@ -28,7 +28,7 @@ const MSG = {
     setDetailDesc: '简洁/标准/详细',
     setMediaCapLabel: '单个文件上限(MB)', setMediaCapDesc: '超过上限不保存媒体,笔记照常生成,并在详情页说明。',
     mediaLevelLabel: '媒体保存', mediaLevelDesc: '新收藏时保存到本地的内容。小红书和抖音的短视频内容主要在画面上,选「音频」时也存视频。',
-    mediaNone: '不保存', mediaAudio: '音频', mediaVideo: '完整视频', mediaManage: '管理', mediaUsage: '已用 {size},位于 {path}', mediaUsageUnknown: '位于 {path}',
+    mediaNone: '不保存', mediaAudio: '音频', mediaVideo: '完整视频', mediaManage: '管理', sizeAtLeast: '至少 {size}', mediaSharedNote: '另有 {count} 条收藏也在用这些文件。', storagePartial: '有 {count} 条收藏读取失败,暂时不能清理。', storageScopeChanged: '智库或文件夹已切换,这次没有移除文件。', mediaUsage: '已用 {size},位于 {path}', mediaUsageUnknown: '位于 {path}',
     mediaLocalAudio: '本地音频', mediaLocalVideo: '本地视频', mediaReveal: '在文件夹中显示', mediaRemove: '移除', mediaNotSaved: '未保存到本地', mediaTooLarge: '文件 {size},超过上限,未保存', mediaNotHere: '此设备未保存',
     mediaRemoveTitle: '移除这份媒体文件?', mediaRemoveBody: '文件进回收站,可以恢复。笔记和字幕保留,这里改为在线播放。', mediaRemoveOk: '移入回收站',
     delMediaTitle: '同时移除媒体文件?', delMediaBody: '这条收藏有 {count} 个本地媒体文件,共 {size}。移除后进回收站,可以恢复。', delMediaOk: '一并移除', delMediaKeep: '保留文件',
@@ -127,7 +127,7 @@ const MSG = {
     setDetailDesc: 'Brief / Standard / Detailed',
     setMediaCapLabel: 'File size limit (MB)', setMediaCapDesc: 'Media above this limit is not saved. The note is still created, and the detail view explains why.',
     mediaLevelLabel: 'Media saving', mediaLevelDesc: 'What new bookmarks save locally. Xiaohongshu and Douyin clips rely on the picture, so Audio still saves the video.',
-    mediaNone: 'None', mediaAudio: 'Audio', mediaVideo: 'Full video', mediaManage: 'Manage', mediaUsage: '{size} used in {path}', mediaUsageUnknown: 'Stored in {path}',
+    mediaNone: 'None', mediaAudio: 'Audio', mediaVideo: 'Full video', mediaManage: 'Manage', sizeAtLeast: 'At least {size}', mediaSharedNote: '{count} other saved items also use these files.', storagePartial: '{count} saved items could not be read, so cleanup is unavailable for now.', storageScopeChanged: 'The vault or folder changed, so no files were removed.', mediaUsage: '{size} used in {path}', mediaUsageUnknown: 'Stored in {path}',
     mediaLocalAudio: 'Local audio', mediaLocalVideo: 'Local video', mediaReveal: 'Show in folder', mediaRemove: 'Remove', mediaNotSaved: 'Not saved locally', mediaTooLarge: '{size} is over the limit, so it was not saved', mediaNotHere: 'Not saved on this device',
     mediaRemoveTitle: 'Remove this media file?', mediaRemoveBody: 'The file moves to the trash and can be restored. The note and transcript stay, and playback goes online.', mediaRemoveOk: 'Move to trash',
     delMediaTitle: 'Remove the media files too?', delMediaBody: 'This bookmark has {count} local media files, {size} in total. They move to the trash and can be restored.', delMediaOk: 'Remove them', delMediaKeep: 'Keep files',
@@ -362,7 +362,6 @@ const DEFAULT_MAX_MB = 500
 function registerSettings() {
   ctx.registerSetting({ key: 'defaultTemplate', label: t('setTplLabel'), type: 'text', default: '通用', description: t('setTplDesc') })
   ctx.registerSetting({ key: 'detail', label: t('setDetailLabel'), type: 'text', default: 'standard', description: t('setDetailDesc') })
-  ctx.registerSetting({ key: 'maxFileMb', label: t('setMediaCapLabel'), type: 'number', default: DEFAULT_MAX_MB, min: 1, description: t('setMediaCapDesc') })
   ctx.registerSetting({ key: 'autoSave', label: t('setAutoLabel'), type: 'boolean', default: false, description: t('setAutoDesc') })
 }
 registerSettings()
@@ -436,8 +435,10 @@ async function mediaGroups() {
   const names = await assetNames()
   if (!names) return null
   const owners = new Map(), opened = openedMap()
+  let partial = 0
   for (const item of (await readIndex()).items || []) {
     const entry = await loadEntry(item.id).catch(() => null)
+    if (!entry) partial++ // 读不到 ≠ 没用到:这条可能也内嵌着别处看到的文件
     for (const name of embeddedAssets(entry?.summaryMarkdown)) owners.set(name, [...(owners.get(name) || []), item])
   }
   const groups = new Map()
@@ -456,9 +457,17 @@ async function mediaGroups() {
       if (size?.bytes) group.bytes += size.bytes; else group.unknown++
     }
   }))
-  return [...groups.values()]
+  return Object.assign([...groups.values()], { partial, owners })
 }
-async function trashAssets(names) {
+const sizeText = (bytes, unknown) => unknown ? t('sizeAtLeast', { size: fmtBytes(bytes) }) : fmtBytes(bytes)
+const groupsSize = (groups) => sizeText(groups.reduce((sum, g) => sum + g.bytes, 0), groups.some((g) => g.unknown))
+/** 除 ids 之外还有几条收藏在用这些文件。 */
+const sharedWith = (groups, names, ids) => new Set(names.flatMap((name) => (groups?.owners?.get(name) || []).map((item) => item.id)).filter((id) => !ids.includes(id))).size
+const withShared = (body, count) => count ? `${body} ${t('mediaSharedNote', { count })}` : body
+/** 确认框开着时可能切了库:同名路径到那时指向别的文件。 */
+const assetScope = () => `${ctx.app.vaultRoot?.() || ''}|${folderRoot()}`
+async function trashAssets(names, scope) {
+  if (scope !== assetScope()) { say(t('storageScopeChanged'), { level: 'warning' }); return names.length }
   let failed = 0
   for (const name of names) await ctx.app.trash(assetVaultRel(name)).catch(() => { failed++ })
   if (failed) say(t('storageFailed', { count: failed }), { level: 'warning' })
@@ -470,15 +479,18 @@ function openStorage() { pendingOpen = { storage: true }; bus.emit({ type: 'open
 /** 三段选择宿主的设置表画不了,自绘一块放在设置表下方。 */
 function mountMediaSettings(el) {
   const style = document.createElement('style')
-  style.textContent = '.bb-set{display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--text)}.bb-set-row{display:flex;gap:18px;align-items:flex-start;justify-content:space-between}.bb-set-row>div:first-child{flex:1;min-width:0}.bb-set p{margin:2px 0 0;font-size:12px;color:var(--text-faint);line-height:1.5}.bb-seg{display:inline-flex;gap:2px;padding:2px;border-radius:6px;background:var(--overlay-light);flex:none}.bb-seg button{height:26px;padding:0 11px;border:0;border-radius:4px;background:none;font:inherit;color:var(--text-muted);cursor:pointer;white-space:nowrap}.bb-seg button.on{background:var(--bg-card);color:var(--text);font-weight:500}.bb-set-manage{height:28px;padding:0 10px;border:0;border-radius:6px;background:var(--overlay-light);font:inherit;color:var(--text);cursor:pointer}'
+  style.textContent = '.bb-set-cap{width:92px;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font:inherit;text-align:right}.bb-set{display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--text)}.bb-set-row{display:flex;gap:18px;align-items:flex-start;justify-content:space-between}.bb-set-row>div:first-child{flex:1;min-width:0}.bb-set p{margin:2px 0 0;font-size:12px;color:var(--text-faint);line-height:1.5}.bb-seg{display:inline-flex;gap:2px;padding:2px;border-radius:6px;background:var(--overlay-light);flex:none}.bb-seg button{height:26px;padding:0 11px;border:0;border-radius:4px;background:none;font:inherit;color:var(--text-muted);cursor:pointer;white-space:nowrap}.bb-seg button.on{background:var(--bg-card);color:var(--text);font-weight:500}.bb-set-manage{height:28px;padding:0 10px;border:0;border-radius:6px;background:var(--overlay-light);font:inherit;color:var(--text);cursor:pointer}'
   const path = `${folderRoot()}/${ASSETS_SUBDIR}`
   const box = document.createElement('div'); box.className = 'bb-set'
   box.innerHTML = `<div class="bb-set-row"><div><div>${t('mediaLevelLabel')}</div><p>${t('mediaLevelDesc')}</p></div><div class="bb-seg">${MEDIA_LEVELS.map((level) => `<button data-level="${level}">${t(level === 'none' ? 'mediaNone' : level === 'audio' ? 'mediaAudio' : 'mediaVideo')}</button>`).join('')}</div></div>
+<div class="bb-set-row"><div><div>${t('setMediaCapLabel')}</div><p>${t('setMediaCapDesc')}</p></div><input class="bb-set-cap" data-cap type="number" min="1" step="1" aria-label="${t('setMediaCapLabel')}"></div>
 <div class="bb-set-row"><div><div>${t('storageTitle')}</div><p data-usage></p></div><button class="bb-set-manage" data-manage>${t('mediaManage')}</button></div>`
   el.replaceChildren(style, box)
   const usage = box.querySelector('[data-usage]'); usage.textContent = t('mediaUsageUnknown', { path })
   const paint = () => box.querySelectorAll('[data-level]').forEach((b) => b.classList.toggle('on', b.dataset.level === mediaLevel()))
   box.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => { try { localStorage.setItem(`plugin.${PLUGIN_ID}.mediaLevel`, b.dataset.level) } catch { /* 下次读到旧值 */ } paint() }))
+  const cap = box.querySelector('[data-cap]'); cap.value = maxFileMb()
+  cap.addEventListener('change', () => { try { if (Number(cap.value) > 0) localStorage.setItem(`plugin.${PLUGIN_ID}.maxFileMb`, cap.value) } catch { /* 下次读到旧值 */ } cap.value = maxFileMb() })
   box.querySelector('[data-manage]').addEventListener('click', () => {
     if (new URLSearchParams(location.search).get('window') !== 'floating') { openStorage(); return }
     // ponytail: 宿主没给跨窗接口,先读它的 URL 约定;认不出就走上面的同窗路径。
@@ -486,7 +498,7 @@ function mountMediaSettings(el) {
     window.close()
   })
   paint()
-  void mediaGroups().then((groups) => { if (groups && usage.isConnected) usage.textContent = t('mediaUsage', { size: fmtBytes(groups.reduce((sum, g) => sum + g.bytes, 0)), path }) }).catch(() => {})
+  void mediaGroups().then((groups) => { if (groups && usage.isConnected) usage.textContent = t('mediaUsage', { size: groupsSize(groups), path }) }).catch(() => {})
 }
 
 // ── 增强自动模式:把开关镜像进 vault 的一个小文件 ─────────────────────────────
@@ -2036,8 +2048,11 @@ function mountAnalyze(el, viewCtx) {
     const button = (label, run) => { const b = document.createElement('button'); b.className = 'bb-btn ghost sm'; b.textContent = label; b.addEventListener('click', run); strip.appendChild(b) }
     if (ctx.app.reveal) button(t('mediaReveal'), () => ctx.app.reveal(assetVaultRel(name)))
     if (ctx.app.trash) button(t('mediaRemove'), async () => {
-      const ok = ctx.ui?.confirm ? await ctx.ui.confirm({ title: t('mediaRemoveTitle'), body: t('mediaRemoveBody'), ok: t('mediaRemoveOk'), danger: true }) : true
-      if (!ok || await trashAssets([name])) return
+      const scope = assetScope(), groups = await mediaGroups().catch(() => ({ partial: 1 }))
+      if (groups?.partial) { say(t('storagePartial', { count: groups.partial }), { level: 'warning' }); return }
+      const body = withShared(t('mediaRemoveBody'), sharedWith(groups, [name], [current.entryId]))
+      const ok = ctx.ui?.confirm ? await ctx.ui.confirm({ title: t('mediaRemoveTitle'), body, ok: t('mediaRemoveOk'), danger: true }) : true
+      if (!ok || await trashAssets([name], scope)) return
       current.mediaGone = true
       if (view === current) { renderMedia(media, meta); void renderMediaStrip(strip, media, meta) }
     })
@@ -2050,13 +2065,13 @@ function mountAnalyze(el, viewCtx) {
     const kind = (g) => { const video = g.files.find((f) => assetKind(f) === 'video'), audio = g.files.find((f) => assetKind(f) === 'audio'); return video ? t('storageVideo') : audio ? t('storageAudio') : t('storageImages', { count: g.files.length }) }
     host.replaceChildren(...rows.map((g) => {
       const row = document.createElement('label'); row.className = 'bb-store-row' + (state.selected.has(g.key) ? ' on' : '')
-      const check = document.createElement('input'); check.type = 'checkbox'; check.checked = state.selected.has(g.key); check.disabled = !ctx.app.trash
+      const check = document.createElement('input'); check.type = 'checkbox'; check.checked = state.selected.has(g.key); check.disabled = !state.canTrash
       check.addEventListener('change', () => { if (check.checked) state.selected.add(g.key); else state.selected.delete(g.key); state.refresh() })
       const text = document.createElement('div'); text.className = 'bb-store-text'
       const title = document.createElement('div'); title.className = 'bb-store-title'; title.textContent = g.title
       const sub = document.createElement('div'); sub.className = 'bb-muted'; sub.textContent = [kind(g), g.platform ? platLabel(g.platform) : '', opened(g)].filter(Boolean).join(' · ')
       text.append(title, sub)
-      const size = document.createElement('div'); size.className = 'bb-store-size'; size.textContent = g.bytes ? fmtBytes(g.bytes) : t('storageUnknown')
+      const size = document.createElement('div'); size.className = 'bb-store-size'; size.textContent = g.bytes ? sizeText(g.bytes, g.unknown) : t('storageUnknown')
       row.append(check, text, size)
       return row
     }))
@@ -2066,6 +2081,7 @@ function mountAnalyze(el, viewCtx) {
   /** 存储页:和收藏页同一个主窗格。只动 assets 里的文件,笔记和字幕不碰。 */
   async function renderStorage() {
     view = null; cur = { kind: 'storage' }
+    const scope = assetScope()
     root.innerHTML = `
 <div class="bb-app bb-native">
   <div class="bb-hdr"><button class="bb-btn ghost sm" data-back title="${t('back')}">←</button><div class="bb-native-title"><div style="font-weight:600">${t('storageTitle')}</div></div></div>
@@ -2075,9 +2091,9 @@ function mountAnalyze(el, viewCtx) {
     const groups = await mediaGroups().catch(() => null), box = root.querySelector('.bb-store')
     if (cur.kind !== 'storage' || !box) return
     if (!groups) { box.querySelector('[data-store-sum]').textContent = t('storageNoTrash'); return }
-    const total = groups.reduce((sum, g) => sum + g.bytes, 0), byKind = { video: 0, audio: 0, image: 0 }
+    const total = groups.reduce((sum, g) => sum + g.bytes, 0), canTrash = !!ctx.app.trash && !groups.partial, byKind = { video: 0, audio: 0, image: 0 }
     for (const g of groups) byKind[assetKind(g.files.find((f) => assetKind(f) !== 'image') || g.files[0])] += g.bytes
-    box.querySelector('[data-store-sum]').textContent = t('storageSum', { size: fmtBytes(total), count: groups.length, path: `${folderRoot()}/${ASSETS_SUBDIR}` })
+    box.querySelector('[data-store-sum]').textContent = t('storageSum', { size: groupsSize(groups), count: groups.length, path: `${folderRoot()}/${ASSETS_SUBDIR}` })
     const legend = (kind, label) => byKind[kind] ? `<span><b>${fmtBytes(byKind[kind])}</b> ${t(label)}</span>` : ''
     box.insertAdjacentHTML('beforeend', `<div class="bb-store-bar">${['video', 'audio', 'image'].map((k) => byKind[k] ? `<i style="flex:${byKind[k]}"></i>` : '').join('')}</div>
 <div class="bb-store-legend">${total ? legend('video', 'storageVideo') + legend('audio', 'storageAudio') + legend('image', 'storageImage') : ''}</div>
@@ -2085,18 +2101,19 @@ function mountAnalyze(el, viewCtx) {
 <div class="bb-store-list" data-store-list></div>
 <div class="bb-store-foot"><span class="bb-muted" data-store-state></span><span style="flex:1"></span><button class="bb-btn primary sm" data-store-trash>${t('storageTrash')}</button></div>`)
     const list = box.querySelector('[data-store-list]'), trash = box.querySelector('[data-store-trash]'), note = box.querySelector('[data-store-state]')
-    const state = { sort: 'largest', selected: new Set(), refresh() {
+    const state = { sort: 'largest', selected: new Set(), canTrash, refresh() {
       const chosen = groups.filter((g) => state.selected.has(g.key))
-      note.textContent = !ctx.app.trash ? t('storageNoTrash') : chosen.length ? t('storageSelected', { count: chosen.length, size: fmtBytes(chosen.reduce((sum, g) => sum + g.bytes, 0)) }) : t('storageHint')
-      trash.style.display = ctx.app.trash ? '' : 'none'; trash.disabled = !chosen.length
+      note.textContent = !ctx.app.trash ? t('storageNoTrash') : groups.partial ? t('storagePartial', { count: groups.partial }) : chosen.length ? t('storageSelected', { count: chosen.length, size: groupsSize(chosen) }) : t('storageHint')
+      trash.style.display = canTrash ? '' : 'none'; trash.disabled = !chosen.length
       box.querySelectorAll('[data-sort]').forEach((b) => b.classList.toggle('on', b.dataset.sort === state.sort))
       renderStorageList(list, groups, state)
     } }
     box.querySelectorAll('[data-sort]').forEach((b) => b.addEventListener('click', () => { state.sort = b.dataset.sort; state.refresh() }))
     trash.addEventListener('click', async () => {
-      const chosen = groups.filter((g) => state.selected.has(g.key)), size = fmtBytes(chosen.reduce((sum, g) => sum + g.bytes, 0))
-      if (ctx.ui?.confirm && !await ctx.ui.confirm({ title: t('mediaRemoveTitle'), body: t('storageSelected', { count: chosen.length, size }), ok: t('storageTrash'), danger: true })) return
-      await trashAssets(chosen.flatMap((g) => g.files))
+      const chosen = groups.filter((g) => state.selected.has(g.key)), names = chosen.flatMap((g) => g.files)
+      const body = withShared(t('storageSelected', { count: chosen.length, size: groupsSize(chosen) }), sharedWith(groups, names, chosen.map((g) => g.key)))
+      if (ctx.ui?.confirm && !await ctx.ui.confirm({ title: t('mediaRemoveTitle'), body, ok: t('storageTrash'), danger: true })) return
+      await trashAssets(names, scope)
       void renderStorage()
     })
     state.refresh()
@@ -2126,7 +2143,7 @@ function mountAnalyze(el, viewCtx) {
       else say2(L() === 'en' ? 'This source cannot seek in-app. Archive the original media to enable timestamp playback.' : '此平台暂不支持应用内定位；存档原始媒体后即可点击时间引用跳转。', { level: 'warning' })
     }
     seekHandler = seek
-    if (view.plat.embed) { const f = document.createElement('iframe'); f.src = view.plat.embed(0); f.allow = 'autoplay; fullscreen'; media.appendChild(f); return }
+    if (view.plat.embed) { media.innerHTML = ''; const f = document.createElement('iframe'); f.src = view.plat.embed(0); f.allow = 'autoplay; fullscreen'; media.appendChild(f); return }
     media.innerHTML = ''
     // 本地封面优先:平台封面地址带时效。文件名规则见 transcribe.py archive_cover。
     const localCover = meta.videoId ? archivedAssetUrl(`bluebird-${String(meta.videoId).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^_+|_+$/g, '').slice(0, 60)}-cover.jpg`) : ''
@@ -2601,15 +2618,15 @@ if (ctx.registerListSource) {
         await writeIndex(idx); await listReload(); bus.emit({ type: 'saved' })
       })() } },
       { id: 'delete', label: t('menuDelete'), run: () => { void (async () => {
-        const groups = ctx.app.trash && ctx.ui?.confirm ? await mediaGroups().catch(() => null) : null
-        const group = (groups || []).find((g) => g.entries.includes(item.key))
+        const scope = assetScope(), groups = ctx.app.trash && ctx.ui?.confirm ? await mediaGroups().catch(() => null) : null
+        const group = groups?.partial ? null : (groups || []).find((g) => g.entries.includes(item.key))
         // 别的收藏还在用的文件不问也不动。只问文件,收藏本身照常删。
         const files = group && group.entries.length === 1 ? group.files : []
-        const removeFiles = files.length > 0 && await ctx.ui.confirm({ title: t('delMediaTitle'), body: t('delMediaBody', { count: files.length, size: fmtBytes(group.bytes) }), ok: t('delMediaOk'), cancel: t('delMediaKeep') })
+        const removeFiles = files.length > 0 && await ctx.ui.confirm({ title: t('delMediaTitle'), body: t('delMediaBody', { count: files.length, size: sizeText(group.bytes, group.unknown) }), ok: t('delMediaOk'), cancel: t('delMediaKeep') })
         const idx = await readIndex()
         idx.items = (idx.items || []).filter((x) => x.id !== item.key)
         await writeIndex(idx)
-        if (removeFiles) await trashAssets(files)
+        if (removeFiles) await trashAssets(files, scope)
         await listReload(); bus.emit({ type: 'saved' })
       })() } },
     ],

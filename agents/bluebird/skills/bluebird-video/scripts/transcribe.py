@@ -332,10 +332,15 @@ def archive_cover(info, save_to, meta, headers):
         (Path(save_to) / name).replace(Path(save_to) / (stem + ".jpg"))
 
 
-def download_images(urls, save_dir, stem, headers):
+def download_images(urls, save_dir, stem, headers, meta=None, max_bytes=None):
     """图片逐张下,**一张挂掉不许拖垮整条**(帖子里少一张图 ≫ 整篇剪藏失败)。回落盘的文件名。"""
     out = []
-    save_dir.mkdir(parents=True, exist_ok=True)
+    limit = min(MAX_IMAGE_BYTES, max_bytes) if max_bytes else MAX_IMAGE_BYTES
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print("存档目录不可用(跳过):%s" % exc, file=sys.stderr)
+        return out
     for idx, url in enumerate(urls, 1):
         try:
             hdrs = dict(headers)
@@ -343,9 +348,12 @@ def download_images(urls, save_dir, stem, headers):
                 hdrs.setdefault("Referer", "https://www.xiaohongshu.com/")
             req = urllib.request.Request(url, headers=hdrs)
             with urllib.request.urlopen(req, timeout=60) as resp:
-                blob = resp.read(MAX_IMAGE_BYTES + 1)
+                blob = resp.read(limit + 1)
                 ctype = resp.headers.get("Content-Type", "")
-            if not blob or len(blob) > MAX_IMAGE_BYTES:
+                total = int(resp.headers.get("Content-Length") or len(blob))
+            if not blob or len(blob) > limit:
+                if blob and meta is not None and max_bytes and total > max_bytes:
+                    meta["mediaSkipped"] = max(meta.get("mediaSkipped", 0), total)
                 continue
             name = "%s-%02d%s" % (stem, idx, image_ext(ctype, url))
             (save_dir / name).write_bytes(blob)
@@ -382,7 +390,7 @@ def dedupe_thumbnails(info):
     return out
 
 
-def image_post_result(info, fallback_url, save_dir=None, headers=None):
+def image_post_result(info, fallback_url, save_dir=None, headers=None, max_bytes=None):
     """图文帖:图 + 正文就是全部内容,没有音轨可转写。"""
     images = dedupe_thumbnails(info)
     meta = build_meta(info, fallback_url)
@@ -394,7 +402,7 @@ def image_post_result(info, fallback_url, save_dir=None, headers=None):
            "note": "图文帖:没有音轨,图片与正文已抓好,不需要转写"}
     if save_dir and images:
         out["assets"] = download_images(images, Path(save_dir),
-                                        "bluebird-" + safe_stem(meta.get("videoId")), headers or {})
+                                        "bluebird-" + safe_stem(meta.get("videoId")), headers or {}, meta, max_bytes)
     return out
 
 
@@ -657,7 +665,7 @@ def run(url, save_to=None, level="audio", max_mb=None):
                 info = ydl.extract_info(url, download=False, process=False)
             if info.get("formats") or info.get("url") or info.get("duration"):
                 raise RetrievalError("metadata", exc) from exc
-            return image_post_result(info, url, media_dir, headers)
+            return image_post_result(info, url, media_dir, headers, max_bytes)
         meta = build_meta(info, url)
         archive_cover(info, save_to, meta, headers)
         segments, lang = extract_subtitles(info, work_dir, langs, headers)
@@ -672,7 +680,7 @@ def run(url, save_to=None, level="audio", max_mb=None):
         # 图文帖:时长 0 且确有图/正文。附加条件是防线 —— 光看 duration==0 会把「元数据缺时长的视频」
         # 误判成图文帖,那样会静默交出一份没有内容的空卡。
         if not (info.get("formats") or info.get("url")) and int(info.get("duration") or 0) == 0 and (dedupe_thumbnails(info) or info.get("description")):
-            return image_post_result(info, url, media_dir, headers)
+            return image_post_result(info, url, media_dir, headers, max_bytes)
         # 有时长却没有任何流 = 地区限制/已删/需登录,不是图文帖。ignore_no_formats_error 让它也回 info
         # 而不是抛,所以这里得自己拦 —— 掉进下面去下音频只会得到一句难懂的 ffmpeg 报错。
         if not (info.get("formats") or info.get("url")):

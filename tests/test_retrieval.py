@@ -147,6 +147,24 @@ class RetrievalChecks(unittest.TestCase):
             module.download_audio("u", pathlib.Path(temp), {}, info)
         self.assertTrue(processed and all("requested_formats" not in item for item in processed))
 
+    def test_image_posts_respect_the_size_limit_and_a_bad_folder_does_not_abort(self):
+        class Response:
+            headers = {"Content-Type": "image/jpeg", "Content-Length": "5000"}
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def read(self, size):
+                return b"x" * min(size, 5000)
+        with tempfile.TemporaryDirectory() as temp, patch.object(module.urllib.request, "urlopen", lambda *a, **k: Response()):
+            meta = {}
+            self.assertEqual(module.download_images(["https://x/a.jpg"], pathlib.Path(temp), "s", {}, meta, 1000), [])
+            self.assertEqual(meta["mediaSkipped"], 5000)
+            self.assertEqual(len(module.download_images(["https://x/a.jpg"], pathlib.Path(temp), "s", {}, {}, 9000)), 1)
+            blocked = pathlib.Path(temp) / "file"
+            blocked.write_text("x")
+            self.assertEqual(module.download_images(["https://x/a.jpg"], blocked / "sub", "s", {}), [])
+
     def test_douyin_share_page_uses_the_page_play_address_and_reports_removed_videos(self):
         class Page:
             def __init__(self, html): self.html, self.url = html, "https://www.iesdouyin.com/share/video/123/"

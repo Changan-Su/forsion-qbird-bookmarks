@@ -70,7 +70,7 @@ A.ok(!reg.views.find((v) => v.id === 'library'), '不应再注册自绘 library 
 A.ok(reg.listSources && reg.listSources.find((x) => x.id === 'library-list'), '应注册 library-list 列表源(统一左栏数据源)')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-open'), '应注册 bluebird-open 命令')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-library'), '应注册 bluebird-library 命令')
-A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail', 'maxFileMb'], '应声明四个设置(存储夹已改用宿主标准 workFolder)')
+A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail'], '应声明三个设置(存储夹已改用宿主标准 workFolder,媒体项在自带面板)')
 A.equal(localeSubs.size, 1, '顶层应订一次宿主语言广播(状态栏 + 设置项就地换语言)')
 
 // ── 工作文件夹约定(1.3.0):默认走宿主 workFolder;老宿主退回 videos;saveFolder 一次性迁移 ──
@@ -467,11 +467,10 @@ A.equal(T.L(), 'en', 'L() 应现读 ctx.getLocale,不缓存')
 emitLocale()
 A.equal(reg.status[0].text, '🐦 Bluebird', '状态栏项应经 update() 就地换成英文')
 A.equal(reg.status[0].title, 'Open Bluebird')
-A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'maxFileMb', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
+A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
 A.equal(reg.settings[0].label, 'Default summary template', '设置项标签应跟着切语言(宿主 registerSetting 同 key 覆盖)')
 A.equal(reg.settings[1].label, 'Default detail level (brief/standard/detailed)')
-A.equal(reg.settings[2].label, 'File size limit (MB)')
-A.equal(reg.settings[3].label, 'Enhanced auto mode')
+A.equal(reg.settings[2].label, 'Enhanced auto mode')
 
 // ── 增强自动模式:开关必须落进 vault 镜像文件 ───────────────────────────────
 // 引擎进程里的「青鸟链接收藏」技能读不到渲染进程的 localStorage,只能读这个文件。
