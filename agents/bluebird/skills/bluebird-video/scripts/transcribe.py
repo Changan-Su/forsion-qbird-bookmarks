@@ -193,6 +193,8 @@ def download_audio(url, work_dir, headers, info=None):
         "retries": 1,
         "fragment_retries": 1,
         "extractor_retries": 1,
+        # B 站 CDN 对不带 Range 的整段 GET 回 567,分块下载每次都带 Range,对其他平台无副作用
+        "http_chunk_size": 10485760,
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         "postprocessor_args": {"extractaudio": ["-ar", "16000", "-ac", "1"]},
         "http_headers": headers,
@@ -201,6 +203,8 @@ def download_audio(url, work_dir, headers, info=None):
     }
     with YoutubeDL(opts) as ydl:
         if info:
+            # 探测时选定的「视频+音频」留在 requested_formats 里,不清掉会盖过 ba/b,下到视频流
+            info = {k: v for k, v in info.items() if k != "requested_formats"}
             selected = ydl.process_ie_result(dict(info), download=False)
             try:
                 ydl.process_ie_result(dict(info), download=True)
@@ -271,6 +275,22 @@ def pick_archive_audio(names):
     return None
 
 
+def archive_media(work_dir, save_to, meta):
+    """把 work_dir 里的原始媒体拷进收藏夹,回文件名列表。存档失败不影响主流程。"""
+    src = pick_archive_audio([i.name for i in work_dir.iterdir() if i.is_file()]) if save_to else None
+    if not src:
+        return []
+    dest_dir = Path(save_to)
+    name = "bluebird-%s%s" % (safe_stem(meta.get("videoId")), Path(src).suffix.lower())
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(work_dir / src), str(dest_dir / name))
+        return [name]
+    except Exception as exc:
+        print("媒体存档失败(不影响后续):%s" % exc, file=sys.stderr)
+        return []
+
+
 def download_images(urls, save_dir, stem, headers):
     """图片逐张下,**一张挂掉不许拖垮整条**(帖子里少一张图 ≫ 整篇剪藏失败)。回落盘的文件名。"""
     out = []
@@ -337,6 +357,35 @@ def image_post_result(info, fallback_url, save_dir=None, headers=None):
     return out
 
 
+def has_no_audio_stream(path):
+    """下载到的文件确有画面、确无音轨才算。探测不了或文件损坏都回 False,让原错误照常上报。"""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return False
+    try:
+        kinds = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
+                               capture_output=True, text=True, timeout=30, check=True).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "video" in kinds and "audio" not in kinds
+
+
+def silent_video_result(info, work_dir, fallback_url, save_to, headers):
+    """无音轨视频:平台元数据说不清(acodec 为空),只有下载后才知道。没有语音可转写,
+    视频本身 + 正文就是全部内容,和图文帖同一条路;抽音频失败不等于抓取失败。"""
+    if any((f.get("acodec") or "none") != "none" for f in info.get("formats") or []):
+        return None  # 平台声明过音频流:这是下载出了问题,不是视频本身没声音
+    src = pick_archive_audio([i.name for i in work_dir.iterdir() if i.is_file()])
+    if not src or not has_no_audio_stream(work_dir / src):
+        return None
+    out = image_post_result(info, fallback_url, save_to, headers)
+    assets = archive_media(work_dir, save_to, out["meta"]) + out.get("assets", [])
+    if assets:
+        out["assets"] = assets
+    out["note"] = "无音轨视频:没有语音可转写,视频封面与正文已抓好"
+    return out
+
+
 def build_meta(info, fallback_url):
     return {
         "videoId": str(info.get("id") or "").strip(),
@@ -345,6 +394,8 @@ def build_meta(info, fallback_url):
         "duration": int(info.get("duration") or 0),
         "webpageUrl": str(info.get("webpage_url") or fallback_url).strip(),
         "thumbnail": str(info.get("thumbnail") or "").strip(),
+        # 作者写的正文:短视频常常只有 BGM,这是唯一的文字内容
+        "description": str(info.get("description") or "").strip(),
     }
 
 
@@ -368,6 +419,32 @@ def request_headers(url):
     if os.environ.get("BLUEBIRD_COOKIE", "").strip():
         headers["Cookie"] = os.environ["BLUEBIRD_COOKIE"].strip()
     return headers
+
+
+def is_xhs_host(host):
+    return host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com") or host in ("xhslink.com", "xhslink.cn")
+
+
+def normalize_url(url):
+    """网页端复制到的 /user/profile/<uid>/<note> 会撞登录墙,同一篇在 /explore/<note> 可读,xsec_token 照留。"""
+    parts = urllib.parse.urlparse(url)
+    note = re.fullmatch(r"/user/profile/[\da-f]+/([\da-f]+)/?", parts.path)
+    if note and is_xhs_host((parts.hostname or "").lower()):
+        return parts._replace(path="/explore/" + note.group(1)).geturl()
+    return url
+
+
+def xiaohongshu_author(url, ydl, headers):
+    """yt-dlp 只给 uploader_id(一串十六进制);昵称在同一页的初始状态里。取不到就算了,不影响抓取。"""
+    from yt_dlp.networking import Request
+    from yt_dlp.utils import js_to_json
+    try:
+        page = ydl.urlopen(Request(url, headers=headers)).read().decode("utf-8", "ignore")
+        state = re.search(r"window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*</script>", page, re.S)
+        notes = json.loads(js_to_json(state.group(1)))["note"]["noteDetailMap"].values()
+        return next(n["note"]["user"]["nickname"] for n in notes if n.get("note", {}).get("user", {}).get("nickname"))
+    except Exception:  # noqa: BLE001 — 作者名是装饰信息,页面改版时退回 uploader_id
+        return ""
 
 
 def diagnostics():
@@ -462,6 +539,42 @@ def bilibili_web_info(url, ydl, headers):
     }
 
 
+MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+             "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+
+
+def douyin_web_info(url, ydl):
+    """yt-dlp 的抖音提取器要浏览器发的新鲜 Cookie;公开分享页不用,播放地址原样取自页面。"""
+    from yt_dlp.networking import Request
+    match = re.search(r"/(?:video|share/video)/(\d+)", url)
+    if not match:  # v.douyin.com 短链:跳转后的地址里才有 id
+        match = re.search(r"/(?:video|share/video)/(\d+)", ydl.urlopen(Request(url, headers={"User-Agent": MOBILE_UA})).url)
+    if not match:
+        raise RuntimeError("Unsupported Douyin URL (only video links are supported)")
+    video_id = match.group(1)
+    # 第一次响应只种 ttwid,同一会话再请求才有视频数据(实测第 2、3 次)
+    item = {}
+    for _ in range(3):
+        page = ydl.urlopen(Request("https://www.iesdouyin.com/share/video/%s/" % video_id, headers={"User-Agent": MOBILE_UA})).read().decode("utf-8", "ignore")
+        state = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>", page, re.S)
+        res = next((v["videoInfoRes"] for v in json.loads(state.group(1)).get("loaderData", {}).values()
+                    if isinstance(v, dict) and v.get("videoInfoRes")), {}) if state else {}
+        item = (res.get("item_list") or [{}])[0]
+        if item:
+            break
+    video = item.get("video") or {}
+    play_urls = (video.get("play_addr") or {}).get("url_list") or []
+    if not play_urls:
+        raise RuntimeError("Douyin video is unavailable (deleted, private or restricted)")
+    return {
+        "id": video_id, "title": item.get("desc") or video_id, "description": item.get("desc") or "",
+        "duration": float(video.get("duration") or 0) / 1000, "uploader": (item.get("author") or {}).get("nickname", ""),
+        "thumbnail": ((video.get("cover") or {}).get("url_list") or [""])[0], "webpage_url": url,
+        "formats": [{"format_id": "share", "url": play_urls[0], "ext": "mp4", "http_headers": {"User-Agent": MOBILE_UA}}],
+        "extractor": "Douyin", "extractor_key": "Douyin",
+    }
+
+
 def run(url, save_to=None):
     try:
         from yt_dlp import YoutubeDL
@@ -469,6 +582,7 @@ def run(url, save_to=None):
         raise RetrievalError("dependencies", "yt-dlp is unavailable in this Python runtime") from exc
     langs = [s.strip() for s in os.environ.get(
         "BLUEBIRD_LANGS", "zh-Hans,zh-CN,zh,en,en-US").split(",") if s.strip()]
+    url = normalize_url(url)
     headers = request_headers(url)
     work_dir = Path(tempfile.mkdtemp(prefix="bluebird_"))
     probe_opts = {"quiet": True, "noprogress": True, "noplaylist": True,
@@ -486,12 +600,15 @@ def run(url, save_to=None):
                     host = (urllib.parse.urlparse(url).hostname or "").lower()
                     if (host == "bilibili.com" or host.endswith(".bilibili.com")) and "unable to extract initial state" in str(initial_error).lower():
                         info = bilibili_web_info(url, ydl, headers)
+                    elif host.endswith("douyin.com") and "fresh cookies" in str(initial_error).lower():
+                        info = douyin_web_info(url, ydl)
                     else:
                         raise
+                if is_xhs_host((urllib.parse.urlparse(url).hostname or "").lower()) and not info.get("uploader"):
+                    info["uploader"] = xiaohongshu_author(url, ydl, headers)
         except Exception as exc:
             # 图文帖没有视频流,yt-dlp 常在这一步就抛 —— 退成不解析流的元数据抽取
-            host = urllib.parse.urlparse(url).hostname or ""
-            if not is_image_post_error(exc) or not (host.endswith(".xiaohongshu.com") or host in ("xiaohongshu.com", "xhslink.com")):
+            if not is_image_post_error(exc) or not is_xhs_host((urllib.parse.urlparse(url).hostname or "").lower()):
                 raise RetrievalError("metadata", exc) from exc
             with YoutubeDL(probe_opts) as ydl:
                 info = ydl.extract_info(url, download=False, process=False)
@@ -511,7 +628,8 @@ def run(url, save_to=None):
         # 有时长却没有任何流 = 地区限制/已删/需登录,不是图文帖。ignore_no_formats_error 让它也回 info
         # 而不是抛,所以这里得自己拦 —— 掉进下面去下音频只会得到一句难懂的 ffmpeg 报错。
         if not (info.get("formats") or info.get("url")):
-            raise RuntimeError("这条内容没有可下载的音视频流(常见:地区限制 / 已删除 / 需登录),也不是图文帖")
+            hint = ";小红书链接需保留 xsec_token,过期后请重新分享" if is_xhs_host((urllib.parse.urlparse(url).hostname or "").lower()) else ""
+            raise RetrievalError("metadata", "这条内容没有可下载的音视频流(常见:地区限制 / 已删除 / 需登录),也不是图文帖" + hint)
 
         # 无字幕:只把音频备好交出去,转写归 Forsion 的语音链路(见文件头)。
         try:
@@ -519,21 +637,14 @@ def run(url, save_to=None):
                 raise RetrievalError("dependencies", "ffmpeg is required for audio transcription")
             audio = download_audio(url, work_dir, headers, info)
         except Exception as exc:
+            # 视频已下到 work_dir、只是抽不出音轨:这种帖子没有语音,不算抓取失败
+            silent = silent_video_result(info, work_dir, url, save_to, headers)
+            if silent:
+                return silent
             # 上面 duration 闸没拦住的图文帖会在这里现形(帖子报了假的流)
             raise RetrievalError("media", exc) from exc
         # 存档在搬走 wav 之前做:原始压缩音频还躺在 work_dir 里,finally 会把整个目录删掉
-        assets = []
-        if save_to:
-            src = pick_archive_audio([i.name for i in work_dir.iterdir() if i.is_file()])
-            if src:
-                dest_dir = Path(save_to)
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                name = "bluebird-%s%s" % (safe_stem(meta.get("videoId")), Path(src).suffix.lower())
-                try:
-                    shutil.copy2(str(work_dir / src), str(dest_dir / name))
-                    assets.append(name)
-                except Exception as exc:
-                    print("音频存档失败(不影响转写):%s" % exc, file=sys.stderr)
+        assets = archive_media(work_dir, save_to, meta)
 
         keep_fd, keep_path = tempfile.mkstemp(prefix=f"bluebird-asr-{safe_stem(meta.get('videoId'))}-", suffix=".wav")
         os.close(keep_fd)
@@ -600,6 +711,10 @@ def selftest():
     assert pick_archive_audio(["audio.wav"]) is None, "只有降质 wav 时不存档"
     assert pick_archive_audio(["audio.wav", "audio.sub.vtt"]) is None
     assert pick_archive_audio([]) is None
+    # 网页端个人页形态的小红书链接改写成可读地址,token 不丢;别的站点原样
+    assert normalize_url("https://www.xiaohongshu.com/user/profile/abc1/6ad8?xsec_token=t=") == "https://www.xiaohongshu.com/explore/6ad8?xsec_token=t="
+    assert normalize_url("https://example.com/user/profile/abc1/6ad8") == "https://example.com/user/profile/abc1/6ad8"
+    assert is_xhs_host("xhslink.cn") and is_xhs_host("www.xiaohongshu.com") and not is_xhs_host("notxiaohongshu.com")
     # 参数解析:路径带空格必须完整拿到
     assert parse_args(["https://x/a", "--save-to", "/Users/a b/收藏夹/assets"]) == ("https://x/a", "/Users/a b/收藏夹/assets")
     assert parse_args(["--save-to=/tmp/x", "https://x/a"]) == ("https://x/a", "/tmp/x")

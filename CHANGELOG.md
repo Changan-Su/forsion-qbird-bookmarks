@@ -1,3 +1,14 @@
+## Unreleased
+
+Media retrieval fixes / 媒体获取修复
+
+- Xiaohongshu videos without an audio track no longer fail: the video, cover and post text are saved. Music-only videos are organized from the post text instead of an empty transcript. Authors show their nickname, `/user/profile` links and `xhslink.cn` work, and share text with Chinese punctuation is cleaned.
+- Bilibili audio downloads use Range requests, fixing HTTP 567, and no longer pick up the video stream selected during probing.
+- Douyin falls back to the public share page when yt-dlp asks for cookies. Only video links are supported; archived videos keep the platform watermark.
+- 小红书无音轨视频不再失败，保存视频、封面和正文；纯 BGM 视频按帖子正文整理，不再拿空转写硬写。作者显示昵称，支持个人页链接和 `xhslink.cn`，分享文案里的中文标点能正确去掉。
+- B 站下载改用 Range 请求，修复 HTTP 567，并且不再误下探测时选中的视频流。
+- 抖音在 yt-dlp 要 Cookie 时退到公开分享页。目前只支持视频链接，存档视频带平台水印。
+
 ## 2.3.1 — 2026-10-21
 
 Automatic upgrade migration and Bilibili retrieval / 自动迁移与 B 站获取修复

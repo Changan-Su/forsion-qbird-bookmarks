@@ -282,6 +282,16 @@ for (const p of ['netease', 'qqmusic', 'applemusic']) A.ok(T.platLabel(p) && T.p
 
 // 分享文案抽链接
 A.equal(T.extractUrl('看看这个 https://youtu.be/dQw4w9WgXcQ 很不错').includes('youtu.be/dQw4w9WgXcQ'), true)
+// 小红书的真实分享文案:短链域名有 .cn,链接后面紧贴中文标点;Markdown 粘贴会转义 &
+A.equal(T.extractUrl('标题... https://xhslink.cn/o/2Ez33pZrosk 存下口令,跳转【小红书】阅读~'), 'https://xhslink.cn/o/2Ez33pZrosk')
+A.equal(T.extractUrl('标题 http://xhslink.com/a/abc,复制本条信息,打开【小红书】App查看'), 'http://xhslink.com/a/abc')
+A.equal(T.extractUrl('https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=\\&xsec_source=app_share'), 'https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=&xsec_source=app_share')
+A.equal(T.extractUrl('[链接](https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=)'), 'https://www.xiaohongshu.com/explore/6ad8?xsec_token=a=')
+A.equal(T.isSupported('https://xhslink.cn/o/2Ez33pZrosk'), true)
+// 链接路径里的中文和成对括号要留着,否则丢歌曲 id
+A.equal(T.extractUrl('听这首 https://music.apple.com/cn/song/晴天/123456789 不错'), 'https://music.apple.com/cn/song/晴天/123456789')
+A.equal(T.extractUrl('https://github.com/a/b/blob/main/note(1).md'), 'https://github.com/a/b/blob/main/note(1).md')
+A.equal(T.parsePlatform('https://xhslink.cn/o/2Ez33pZrosk').platform, 'xiaohongshu')
 
 // 拆 Agent 产出:剥掉 bluebird 数据块
 const parsed = T.parseAgentOutput('# 总结\n正文内容\n\n```json bluebird\n{"meta":{"title":"T"},"segments":[{"start":1,"end":2,"text":"hi"}],"tags":["a"]}\n```')
@@ -693,7 +703,20 @@ A.equal(T.t('queueTitle'), '分析队列')
   const two=await T.saveEntry({summaryMarkdown:'# Same title\n\nSecond',sourceUrl:'https://example.com/two',meta:{}})
   A.notEqual(one.notePath,two.notePath)
   A.equal(V.get(one.notePath),'User edited note')
+  // 正文开头已内嵌同一份媒体时不再叠一个播放器;音频放在文末小节时顶部照常有播放器。
+  const count=(p,name)=>V.get(p).split(`${name}]]`).length-1
+  const silent=await T.saveEntry({summaryMarkdown:'# Silent clip\n\n![[bluebird-x.mp4]]\n\n## 正文\n\nPost',sourceUrl:'https://example.com/silent',meta:{}})
+  A.equal(count(silent.notePath,'bluebird-x.mp4'),1)
+  const voiced=await T.saveEntry({summaryMarkdown:'# Voiced clip\n\n## 要点\n\nText\n\n## 原始音频\n\n![[bluebird-y.m4a]]',sourceUrl:'https://example.com/voiced',meta:{}})
+  A.equal(count(voiced.notePath,'bluebird-y.m4a'),2)
 }
+// 纯 BGM 视频:SenseVoice 回一个句号,不算有语音,改按帖子正文整理且不带转写。
+A.equal(T.hasSpeech({text:'.'}),false)
+A.equal(T.hasSpeech({text:' 。 '}),false)
+A.equal(T.hasSpeech({text:'你好'}),true)
+A.match(T.transcriptPrompt({text:'.',segments:[]},'Post body'),/No speech was recognized[\s\S]*Post body/)
+A.doesNotMatch(T.transcriptPrompt({text:'.',segments:[]},'Post body'),/Organize this speech transcription/)
+A.match(T.transcriptPrompt({text:'hello',segments:[]},'Post body'),/Organize this speech transcription[\s\S]*hello[\s\S]*Post body/)
 // A vault change during the index read must reject before writing any note or index.
 {
  const read=ctx.app.readFile,rootBefore=VAULT.root,before=writes.length

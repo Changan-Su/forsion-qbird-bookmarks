@@ -487,11 +487,16 @@ const MUSIC_PLATFORMS = ['netease', 'qqmusic', 'applemusic']
 const isMusic = (platform) => MUSIC_PLATFORMS.includes(platform)
 const platLabel = (p) => t((PLATFORM_META[p] || PLATFORM_META['']).key)
 
-const SUPPORTED = /(?:youtu\.?be|youtube\.com|bilibili\.com|b23\.tv|xiaohongshu\.com|xhslink\.com|douyin\.com|github\.com|music\.163\.com|163cn\.tv|y\.qq\.com|music\.apple\.com)/i
+const SUPPORTED = /(?:youtu\.?be|youtube\.com|bilibili\.com|b23\.tv|xiaohongshu\.com|xhslink\.(?:com|cn)|douyin\.com|github\.com|music\.163\.com|163cn\.tv|y\.qq\.com|music\.apple\.com)/i
 /** 从分享文本里抠出第一条支持的链接(粘一整段分享文案也能识别)。 */
 function extractUrl(text) {
-  const m = String(text || '').match(new RegExp(`https?:\\/\\/[^\\s]*${SUPPORTED.source}[^\\s]*`, 'i'))
-  return m ? m[0] : String(text || '').trim()
+  // 分享文案常把中文标点直接贴在链接后面;Markdown 复制来的链接把 & 转义成 \&。
+  // 中文不算分隔符:Apple Music 的路径里就有歌名。
+  const c = '[^\\s\\]"\'<>，。！？、；：（）《》【】「」]'
+  const m = String(text || '').match(new RegExp(`https?:\\/\\/${c}*${SUPPORTED.source}${c}*`, 'i'))
+  if (!m) return String(text || '').trim()
+  const url = m[0].replace(/\\&/g, '&').replace(/,[一-鿿].*$/, '').replace(/[,.;!?]+$/, '')
+  return url.includes('(') ? url : url.replace(/\)+$/, '')
 }
 const isSupported = (url) => SUPPORTED.test(String(url || ''))
 
@@ -692,6 +697,13 @@ async function asrTranscribeFile(audioPath) {
 const transcriptForPrompt = (asr) => (asr.segments.length
   ? asr.segments.map((s) => `[${fmtTime(s.start)}] ${s.text}`).join('\n')
   : asr.text)
+/** 纯 BGM 的视频 SenseVoice 回 "." 而不是空串,所以看有没有字母或数字,不看 trim。 */
+const hasSpeech = (asr) => /[\p{L}\p{N}]/u.test(asr.text)
+function transcriptPrompt(asr, postText) {
+  const post = postText ? `\nThe author's post text, also source content: ${JSON.stringify(postText)}` : ''
+  if (!hasSpeech(asr)) return `No speech was recognized in this video. Organize only the post text below and do not invent spoken content.${post}`
+  return `Organize this speech transcription. ${asr.segments.length ? 'Line timestamps are verified.' : 'No verified timestamps are available; do not invent them.'}\n${JSON.stringify(transcriptForPrompt(asr))}${post}`
+}
 
 /** 引擎事件 → 进度阶段(百分比不是编的:status/tool_call/tool_result/token 都是真事件)。
  *  生成阶段没有总量可参照,按已产出字数往 92% 爬 —— 只保证单调、不假装精确。
@@ -951,7 +963,9 @@ async function saveEntryInner(full,vault,folder) {
   const fm = ['---', `bluebird_id: ${id}`, `source: ${src}`, `platform: ${(full.meta && full.meta.platform) || plat.platform || ''}`, '---', ''].join('\n')
   // 顶部播放器块:在线源写裸 URL 一行(宿主的书签卡就地渲成播放器),已存档写 wiki 嵌入。
   // 有了它,"点正文时间戳 → 本笔记内的播放器就地跳过去" 这条最舒服的路径天然成立。
-  const player = full.kind === 'link' ? '' : localName ? `![[${assetVaultRel(localName)}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
+  // 正文开头已内嵌这份媒体(无音轨视频的成稿)就不再加一个,否则两个播放器紧挨着。
+  const embeddedAtTop = localName && String(full.summaryMarkdown || '').split(/^## /m)[0].includes(`![[${localName}]]`)
+  const player = full.kind === 'link' || embeddedAtTop ? '' : localName ? `![[${assetVaultRel(localName)}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
   const body = linkifyTimestamps(scopedMediaRefs(full.summaryMarkdown,folder), plat.watch, localName, ctx.registerEditorExtension ? id : null)
   if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
   const scopedWrite = async (p,text,create=false) => {
@@ -1387,13 +1401,14 @@ ${spec}${respondIn()}`
       onStage(45,'stgAsr',null,'transcribing'); await persistRuntime(true)
       const asr=await asrTranscribeFile(it.audioPath)
       if (it.cancelRequested || pluginDisposed || it.controller.signal.aborted) throw Object.assign(Error(t('canceled')),{ aborted:!pluginDisposed })
-      if (!asr.text.trim()) throw Object.assign(Error(t('errAsrEmpty')),{ engineTerminal:true })
+      const postText=String(parsed.data.meta?.description || '').trim()
+      if (!hasSpeech(asr) && !postText) throw Object.assign(Error(t('errAsrEmpty')),{ engineTerminal:true })
       it.phase='summary'; onStage(62,'stgSummarizing',null,'transcribing')
-      const next=`Organize this speech transcription. ${asr.segments.length ? 'Line timestamps are verified.' : 'No verified timestamps are available; do not invent them.'}\n${JSON.stringify(transcriptForPrompt(asr))}\n${taskInstructions(it)}\nAvailable archived assets: ${JSON.stringify(it.assets)}. Preserve them as ![[filename]] embeds.\n${spec}${respondIn()}`
+      const next=`${transcriptPrompt(asr,postText)}\n${taskInstructions(it)}\nAvailable archived assets: ${JSON.stringify(it.assets)}. Preserve them as ![[filename]] embeds.\n${spec}${respondIn()}`
       out=await runAgent(cfg,it.sessionId,next,onTick,it.controller.signal,onStage,it)
       parsed=parseAgentOutput(out)
       if (parsed.data?.error) throw Object.assign(Error(parsed.data.error.message || t('errAnalyze')),{ engineTerminal:true })
-      if (asr.segments.length) parsed.data={ ...(parsed.data || {}),segments:asr.segments }
+      if (asr.segments.length && hasSpeech(asr)) parsed.data={ ...(parsed.data || {}),segments:asr.segments }
     }
     if(pluginDisposed || it.cancelRequested)throw Object.assign(Error(t('canceled')),{aborted:!pluginDisposed && it.errKey==='canceled'})
     it.summary=parsed.summary || out; it.data=parsed.data; it.title=parsed.data?.meta?.title || deriveTitle(it.summary)
@@ -2408,7 +2423,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 }) : null
 
 if (globalThis.__BLUEBIRD_TEST__) {
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry, hasSpeech, transcriptPrompt })
   Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
