@@ -52,8 +52,7 @@ const MSG = {
     promptMoveTo: '移动到',
     ok: '确定', cancel: '取消',
     // 首页
-    homeTagline: '收藏链接到你的知识库。有可用的 Tangu 引擎时,还可以抓字幕并整理成笔记。',
-    urlPlaceholder: '粘贴链接,或整段分享文案…',
+    urlPlaceholder: '粘贴链接或整段分享文案，回车先收藏',
     saveLink: '收藏链接', savingLink: '保存中…', savedLink: '链接已存入收藏夹',
     linkLabel: '链接', linkContentHint: '仅保存了链接,尚未抓取网页正文。', savedAt: '保存于 {time}',
     linkOnlyHint: '可直接收藏链接;视频整理需要可用的 Tangu 引擎。',
@@ -138,8 +137,7 @@ const MSG = {
     promptFolderName: 'Folder name', promptNewFolder: 'New folder name',
     promptMoveTo: 'Move to',
     ok: 'OK', cancel: 'Cancel',
-    homeTagline: 'Save links in your library. With a Tangu engine available, you can also fetch transcripts and organize them into notes.',
-    urlPlaceholder: 'Paste a link, or the whole share text…',
+    urlPlaceholder: 'Paste a link or share text, press Enter to save',
     saveLink: 'Save link', savingLink: 'Saving…', savedLink: 'Link saved to your library',
     linkLabel: 'Link', linkContentHint: 'Only the link was saved. Page content has not been fetched.', savedAt: 'Saved {time}',
     linkOnlyHint: 'You can save this link. Organizing a video needs an available Tangu engine.',
@@ -196,7 +194,21 @@ const MSG = {
 }
 // Upgrade labels are paired; user-authored instructions are never translated.
 Object.assign(MSG.zh, {
-  "libNew": "＋ 新建收藏",
+  "libNew": "新建收藏",
+  "newFolder": "新建文件夹",
+  "movedEntry": "已移到「{name}」",
+  "dateToday": "今天",
+  "dateYesterday": "昨天",
+  "dateDaysAgo": "{n} 天前",
+  "secRunning": "进行中",
+  "secAttention": "需要你处理",
+  "secRecent": "最近整理",
+  "savedOnly": "仅收藏",
+  "organize": "整理",
+  "moreItems": "还有 {n} 条",
+  "organizeOptions": "整理选项",
+  "homeEmptyTitle": "还没有收藏",
+  "homeEmptyLine": "粘贴一个链接，回车先存下来；想整理成笔记就按 ⌘ / Ctrl + 回车。",
   "saveLink": "仅收藏",
   "addToQueue": "收藏并整理",
   "organizeLink": "抓取正文并整理",
@@ -263,7 +275,21 @@ Object.assign(MSG.zh, {
   "newVersion": "新结果版本"
 })
 Object.assign(MSG.en, {
-  "libNew": "+ New bookmark",
+  "libNew": "New bookmark",
+  "newFolder": "New folder",
+  "movedEntry": "Moved to \"{name}\"",
+  "dateToday": "Today",
+  "dateYesterday": "Yesterday",
+  "dateDaysAgo": "{n} days ago",
+  "secRunning": "In progress",
+  "secAttention": "Needs attention",
+  "secRecent": "Recently organized",
+  "savedOnly": "Saved only",
+  "organize": "Organize",
+  "moreItems": "{n} more",
+  "organizeOptions": "Organizing options",
+  "homeEmptyTitle": "No bookmarks yet",
+  "homeEmptyLine": "Paste a link and press Enter to save it. Press ⌘ / Ctrl + Enter to organize it into a note.",
   "saveLink": "Save only",
   "addToQueue": "Save and organize",
   "organizeLink": "Fetch and organize",
@@ -1229,6 +1255,47 @@ async function ensureWorkFolder() {
 // ── 跨视图小总线(library 点条目 → folder 视图打开;队列变更广播) ──
 const bus = (() => { const subs = new Set(); return { on: (f) => (subs.add(f), () => subs.delete(f)), emit: (e) => subs.forEach((f) => { try { f(e) } catch { /* ignore */ } }) } })()
 let pendingOpen = null // library 点击后暂存,folder 视图 mount/聚焦时消费
+// 收藏索引的内存快照:左栏和主页共用。读失败留着上一份并记 listFailed,不当成空库。
+const emptyIndex = () => ({ folders: [], items: [] })
+let lidx = emptyIndex(), listScope = '', listGeneration = 0, listLoaded = false, listFailed = false, listTaskSig = ''
+const currentIndex = () => listScope === playbackScope() ? lidx : emptyIndex()
+const listSubs = new Set()
+const fire = () => listSubs.forEach((f) => { try { f() } catch { /* ignore */ } })
+const listReload = async () => {
+  const scope = playbackScope(), generation = ++listGeneration
+  if (scope !== listScope) { listScope = scope; lidx = emptyIndex(); listLoaded = listFailed = false; fire(); bus.emit({ type: 'index' }) }
+  let next = null
+  try { next = await readIndex() } catch { /* 下面按读失败处理 */ }
+  if (scope !== playbackScope() || generation !== listGeneration) return
+  listFailed = !next
+  // 库还没恢复时 readFile 静默返回 null:这时的「空」只是不知道,主页不能画成全新用户。
+  if (next) { lidx = next; listLoaded = !ctx.app.vaultRoot || !!taskScope() }
+  fire(); bus.emit({ type: 'index' })
+}
+bus.on((e) => {
+  if (e.type === 'saved') void listReload() // 收藏落盘 / 条目改动即刷新
+  else if (e.type === 'nav') fire()
+  else if (e.type === 'queue') { // 进度噪音不刷新:只有状态或阶段变了才让左栏重画,也不重读磁盘
+    const sig = JSON.stringify(shownTasks().map((it) => [it.id, it.status, it.progressKey, it.progressVars, it.errKey, it.saveError]))
+    if (sig !== listTaskSig) { listTaskSig = sig; fire() }
+  }
+})
+const guarded = (fn) => fn().catch((error) => say(t('failedPrefix', { msg: (error && error.message) || error }), { level: 'error' }))
+/** 只移出列表:笔记、sidecar 和素材都留着,撤销把同一行放回原位。 */
+async function removeEntry(id) {
+  let row = null, at = -1
+  const scope = indexScope()
+  const done = await mutateIndex((idx) => {
+    at = idx.items.findIndex((x) => x.id === id)
+    if (at < 0) return false
+    row = idx.items.splice(at, 1)[0]
+  }, { scope })
+  if (!done) return
+  say(t('removedEntry'), { level: 'success', key: 'removed-' + id, action: { label: t('undo'), run: () => void guarded(() => mutateIndex((idx) => {
+    if (idx.items.some((x) => x.id === id)) return false
+    idx.items.splice(Math.min(at, idx.items.length), 0, { ...row, folderId: idx.folders.some((f) => f.id === row.folderId) ? row.folderId : null })
+  }, { scope })) } })
+}
 
 // ── 运行队列:照原版 analysis-queue-context 同构 ────────────────────────────
 // 五态 pending/parsing/transcribing/completed/error;串行 FIFO;完成项不自动消失(手动移除/清除已完成)。
@@ -1312,6 +1379,31 @@ const qActive = () => queue.items.filter((i) => i.status === 'parsing' || i.stat
 // (英文界面里残留一行「请先登录 Forsion」)。引擎回的原始错误/异常没有键 → 落 error 裸串,渲染时原样出。
 const qStageText = (it) => stageText(it.progressKey, it.progressVars)
 const qErrText = (it) => (it.errKey ? t(it.errKey) : it.error || '')
+const shownTasks = () => queue.items.filter((it) => belongsHere(it) && !it.hidden)
+const isRunning = (it) => ['pending','parsing','transcribing','canceling'].includes(it.status)
+/** 要用户动手的任务。自己取消的不算,完成的留在「最近整理」,除非笔记没存上。 */
+const needsYou = (it) => ['interrupted','ready'].includes(it.status) || (it.status === 'error' && it.errKey !== 'canceled') || (it.status === 'completed' && !!it.saveError)
+const canRetry = (it) => it.status === 'error' && it.errKey !== 'cancelUnknown'
+const taskEntryId = (it) => it.entryId || it.replaceEntry || null
+const hasEntryRow = (it) => currentIndex().items.some((row) => row.id === taskEntryId(it))
+const taskTitle = (it) => it.title || it.importTitle || (String(it.url).startsWith('local://') ? t('localImport') : bareUrl(it.url))
+const taskLabel = (it) => it.status === 'interrupted' ? t('interrupted') : it.status === 'canceling' ? t('canceling') : it.status === 'ready' ? t('vaultChanged')
+  : it.status === 'pending' ? t('stQueued') : it.status === 'completed' ? (it.saveError ? t('saveFailed', { msg: it.saveError }) : t('stDone')) : it.status === 'error' ? t('stFailed') : (qStageText(it) || t('stWorking'))
+function retryTask(it) {
+  it.hidden = true
+  return qAdd(it.url,it.tpl,it.detail,it.requirements || '',{importText:it.importText,importAudio:it.importAudio,importTitle:it.importTitle,importSegments:it.importSegments,replaceEntry:it.replaceEntry})
+}
+const bareUrl = (s) => String(s || '').replace(/^https?:\/\//i, '').replace(/\/$/, '')
+/** 今天、昨天、N 天前,超过一周写月-日,跨年带年份。 */
+function relDate(date, now = new Date()) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date || '')
+  if (!m) return date || ''
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(+m[1], m[2] - 1, +m[3])) / 864e5)
+  if (days === 0) return t('dateToday')
+  if (days === 1) return t('dateYesterday')
+  if (days > 1 && days <= 7) return t('dateDaysAgo', { n: days })
+  return +m[1] === now.getFullYear() ? `${m[2]}-${m[3]}` : `${m[1]}-${m[2]}-${m[3]}`
+}
 function qAdd(url, tpl, detail, requirements = '', options = {}) {
   const it = {
     id: uuid(), url, tpl, detail, requirements, vault: taskScope(), workFolder: folderRoot(), plat: parsePlatform(url), sessionId: uuid(),
@@ -1600,9 +1692,6 @@ const STYLE = `
 .bb-app{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bb-bg)}
 .bb-hdr{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bb-border-sub);background:var(--bb-header)}
 .bb-body{flex:1;min-height:0;overflow:auto;padding:14px}
-.bb-hero{max-width:640px;margin:6vh auto 0;text-align:center}
-.bb-hero h1{font-size:26px;font-weight:700;margin:0 0 6px;color:var(--bb-primary)}
-.bb-hero p{color:var(--bb-text-muted);margin:0 0 18px}
 .bb-cols{display:flex;gap:14px;align-items:stretch}
 .bb-col-l{flex:0 0 42%;min-width:0;display:flex;flex-direction:column;gap:12px}
 .bb-col-r{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -1674,7 +1763,7 @@ const STYLE = `
 .bb-qic.ok{background:var(--bb-tint);color:var(--bb-primary)}
 .bb-qic.bad{color:var(--bb-danger);border:1px solid var(--bb-danger)}
 .bb-qic.spin{border:2px solid var(--bb-border);border-top-color:var(--bb-primary);animation:bbspin 1s linear infinite}
-.bb-qic.wait{border:2px dashed var(--bb-border)}
+.bb-qic.wait{border:2px solid var(--bb-border)}
 @keyframes bbspin{to{transform:rotate(360deg)}}
 /* 阶段步骤条(路标式:✓ 已过 / 高亮当前) */
 .bb-steps{display:flex;gap:4px;align-items:center;margin-top:7px;font-size:10.5px;color:var(--bb-text-subtle);flex-wrap:wrap}
@@ -1688,19 +1777,39 @@ const STYLE = `
 .bb-thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .bb-ph.ov{position:absolute;inset:0;background:rgba(0,0,0,.4);color:rgba(255,255,255,.95)} /* 压在封面暗色遮罩上,与主题无关 */
 .bb-ph.ov a{color:rgba(255,255,255,.95);text-decoration:underline}
-.bb-root .bb-hero{max-width:680px;margin:5vh auto 0;text-align:left}
-.bb-root .bb-hero h1{font-size:var(--ui-font-display,24px);margin-bottom:8px}
-.bb-root .bb-compose{margin-top:24px;padding:20px;background:var(--bb-surf);border:1px solid var(--bb-border);border-radius:var(--radius-lg,12px)}
-.bb-root .bb-compose>.bb-label{font-size:var(--ui-font-meta,12px);font-weight:500;display:block;margin:12px 0 8px}
-.bb-root .bb-compose>.bb-label:first-child{margin-top:0}
-.bb-root .bb-requirements{display:block;width:100%;min-height:130px;resize:vertical;line-height:1.7;font-family:var(--font-ui,inherit)}
-.bb-root .bb-presets{flex-wrap:wrap;gap:5px;margin-top:8px}
-.bb-root .bb-options{margin-top:18px;color:var(--bb-text-muted);font-size:var(--ui-font-meta,12px)}
-.bb-root .bb-options>.bb-row{margin-top:10px;flex-wrap:wrap}
-.bb-root .bb-compose-actions{margin-top:20px;justify-content:flex-end;flex-wrap:wrap;gap:8px}
-.bb-root .bb-compose-actions>[data-import]{margin-right:auto}
-.bb-root [data-warn]{font-size:var(--ui-font-meta,12px);margin-top:8px;min-height:20px}
-.bb-root .bb-task-list{max-width:680px;margin:20px auto}
+.bb-root .bb-home{width:min(680px,100%);margin:0 auto;padding:44px 0 24px;display:flex;flex-direction:column;gap:26px}
+.bb-root [data-legacy]:empty{display:none}
+.bb-root .bb-compose{background:var(--bg-card,var(--bb-surf));border-radius:var(--radius-lg,12px);box-shadow:var(--card-shadow,none)}
+.bb-root .bb-cline{display:flex;align-items:center;gap:4px;min-height:48px;padding:6px 8px 6px 12px}
+.bb-root .bb-cline [data-url]{flex:1;min-width:0;height:32px;padding:0 6px;border:0;outline:0;background:transparent;color:inherit;font:inherit;font-size:var(--ui-font-body,13px)}
+.bb-root .bb-clead,.bb-root .bb-qlead{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted,var(--bb-text-muted))}
+.bb-root .bb-clead img,.bb-root .bb-qlead img{width:18px;height:18px;object-fit:contain;border-radius:4px}
+.bb-root .bb-cdet{flex:none;font-size:var(--ui-font-meta,12px);color:var(--text-faint,var(--bb-text-muted))}
+.bb-root .bb-cdet:empty{display:none}
+.bb-root .bb-cbtn{width:30px;height:30px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:var(--text-muted,var(--bb-text-muted));border-radius:var(--radius-sm,6px);cursor:pointer}
+.bb-root .bb-cbtn:hover{background:var(--overlay-subtle,var(--bb-surf))}
+.bb-root .bb-cbtn[hidden]{display:none}
+.bb-root .bb-cexp{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}
+.bb-root .bb-cexp[hidden]{display:none}
+.bb-root .bb-requirements{display:block;width:100%;min-height:58px;resize:vertical;line-height:1.7;font-family:var(--font-ui,inherit)}
+.bb-root .bb-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.bb-root .bb-chip{height:26px;max-width:100%;padding:0 10px;border:0;border-radius:var(--radius-pill,999px);background:var(--overlay-subtle,var(--bb-surf));color:var(--text-muted,var(--bb-text-muted));font:inherit;font-size:var(--ui-font-meta,12px);cursor:pointer}
+.bb-root .bb-chip:hover{background:var(--overlay-light,var(--bb-surf))}
+.bb-root .bb-chip.on{background:var(--accent-soft,var(--bb-surf));color:var(--accent-ink,inherit);font-weight:500}
+.bb-root .bb-cfoot{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.bb-root [data-warn]{flex:1;min-width:0;font-size:var(--ui-font-meta,12px)}
+.bb-root .bb-shelf{display:flex;flex-direction:column;gap:26px}
+.bb-root .bb-shelf section{display:flex;flex-direction:column;gap:2px}
+.bb-root .bb-shelf-h{display:flex;justify-content:space-between;align-items:baseline;padding:0 10px 6px;font-size:var(--ui-font-meta,12px);font-weight:500;color:var(--text-muted,var(--bb-text-muted))}
+.bb-root .bb-shelf-h span{font-weight:400;color:var(--text-faint,var(--bb-text-muted))}
+.bb-root .bb-shelf-more{padding:4px 10px;font-size:var(--ui-font-meta,12px);color:var(--text-faint,var(--bb-text-muted))}
+.bb-root .bb-shelf .bb-qrow{align-items:center;gap:11px;margin:0;padding:8px 10px;border:0;background:transparent;border-radius:var(--radius-md,8px)}
+.bb-root .bb-shelf .bb-qrow:hover{background:var(--overlay-subtle,var(--bb-surf))}
+.bb-root .bb-shelf .bb-qrow .ttl{font-size:var(--ui-font-body,13px);line-height:20px}
+.bb-root .bb-shelf .bb-qrow .sub{font-size:var(--ui-font-meta,12px);line-height:17px;margin:0;color:var(--text-muted,var(--bb-text-muted));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-root .bb-shelf .bb-prog-track{height:2px}
+.bb-root .bb-qdate{flex:none;font-size:var(--ui-font-meta,12px);color:var(--text-faint,var(--bb-text-muted))}
+.bb-root .bb-home-empty{padding:32px 10px;text-align:center;color:var(--text-muted,var(--bb-text-muted))}
 .bb-root .bb-recovery{padding:12px 14px;margin:16px 0;background:var(--bb-surf);border:1px solid var(--bb-border);border-radius:var(--radius-md,8px);font-size:var(--ui-font-body,13px)}
 .bb-root .bb-recovery p{margin:0 0 8px}
 .bb-root .bb-prog-fill.indeterminate{animation:bb-indeterminate 1.8s ease-in-out infinite}
@@ -1711,7 +1820,7 @@ const STYLE = `
 .bb-root .bb-log-tools select{min-width:100px;max-width:260px}
 .bb-root .bb-log-content{flex:1;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;font:var(--ui-font-meta,12px)/1.7 var(--font-mono,monospace);margin:0}
 .bb-root .bb-menu>button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:8px 12px;cursor:pointer;font:inherit}
-@media(max-width:680px){.bb-root .bb-hero{margin-top:12px}.bb-root .bb-compose{padding:14px}.bb-root .bb-qrow{flex-wrap:wrap}.bb-root .bb-qrow .acts{flex-wrap:wrap}.bb-root .bb-compose-actions>[data-import]{width:100%;text-align:left}.bb-root .bb-log-tools{align-items:stretch}.bb-root .bb-native-actions{flex-wrap:wrap}}
+@media(max-width:680px){.bb-root .bb-home{padding-top:12px}.bb-root .bb-qrow{flex-wrap:wrap}.bb-root .bb-qrow .acts{flex-wrap:wrap}.bb-root .bb-log-tools{align-items:stretch}.bb-root .bb-native-actions{flex-wrap:wrap}}
 @media(prefers-reduced-motion:reduce){.bb-root .bb-prog-fill.indeterminate{animation:none}}
 
 `
@@ -1730,6 +1839,13 @@ function themeObserver(root) {
   return () => { ob.disconnect(); if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq) }
 }
 const say = (m, o) => (ctx.notify ? ctx.notify(m, o) : ctx.app.notify(m))
+const SHELF_ROWS = 6
+const svgIcon = (body) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+const ICON = {
+  link: svgIcon('<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>'),
+  clip: svgIcon('<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>'),
+  sliders: svgIcon('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'),
+}
 
 // ══ 收藏夹视图 ══════════════════════════════════════════════════════════════
 let _menuCleanup = null
@@ -1824,6 +1940,8 @@ function mountAnalyze(el, viewCtx) {
   let openGeneration = 0, disposed = false
   let mediaScope = playbackScope()
   let homeCheck = null // 首页链接提示行的重算入口(切语言回填链接后要重跑一次)
+  let homeEmpty = null
+  const organizing = new Set()
   const say2 = say
 
   // ── 首页:输入面板 + 分析队列面板(照原版 LinkInputPanel + AnalysisQueueList 同屏) ──
@@ -1833,28 +1951,38 @@ function mountAnalyze(el, viewCtx) {
     const draftKey=taskScope(), draft=runtime.drafts[draftKey] || {}
     const tplOpts=TEMPLATES.map(v=>`<option value="${v}">${tplLabel(v)}</option>`).join('')
     const detOpts=Object.keys(DETAILS).map(k=>`<option value="${k}">${detailLabel(k)}</option>`).join('')
-    root.innerHTML=`<div class="bb-app bb-collect"><div class="bb-body">
-      <div class="bb-hero"><h1>${t('appName')}</h1><p>${t('homeTagline')}</p>
+    root.innerHTML=`<div class="bb-app bb-collect"><div class="bb-body"><div class="bb-home">
       <div data-legacy></div><div class="bb-compose">
-        <label class="bb-label" for="bb-url-${openGeneration}">${t('linkLabel')}</label>
-        <input class="bb-input" id="bb-url-${openGeneration}" data-url placeholder="${t('urlPlaceholder')}" />
-        <label class="bb-label" for="bb-requirements-${openGeneration}">${t('requirements')}</label>
-        <textarea class="bb-input bb-requirements" id="bb-requirements-${openGeneration}" data-requirements placeholder="${t('requirementsHint')}"></textarea>
-        <div class="bb-row bb-presets"><button class="bb-btn ghost sm" data-bi>${t('presetBilingual')}</button><button class="bb-btn ghost sm" data-study>${t('presetStudy')}</button><button class="bb-btn ghost sm" data-presets>${t('presetSaved')}</button><button class="bb-btn ghost sm" data-save-preset>${t('savePreset')}</button></div>
-        <details class="bb-options"><summary>${t('moreOptions')}</summary><div class="bb-row"><select class="bb-sel" data-tpl aria-label="${t('setTplLabel')}">${tplOpts}</select><select class="bb-sel" data-detail aria-label="${t('setDetailLabel')}">${detOpts}</select></div></details>
-        <div class="bb-row bb-compose-actions"><button class="bb-btn ghost" data-import>${t('localImport')}</button><input type="file" data-import-file accept=".txt,.srt,.vtt,audio/*,video/*" hidden /><button class="bb-btn" data-bookmark>${t('saveLink')}</button><button class="bb-btn primary" data-go title="⌘ / Ctrl + Enter">${t('addToQueue')}</button></div>
-        <div class="bb-muted" data-warn role="status"></div>
-      </div></div><div data-queue class="bb-task-list"></div></div></div>`
+        <div class="bb-cline"><span class="bb-clead" data-platform>${ICON.link}</span>
+          <input data-url placeholder="${t('urlPlaceholder')}" aria-label="${t('linkLabel')}" />
+          <span class="bb-cdet" data-detected></span>
+          <button class="bb-cbtn" data-more title="${t('organizeOptions')}" aria-label="${t('organizeOptions')}">${ICON.sliders}</button>
+          <button class="bb-cbtn" data-import title="${t('localImport')}" aria-label="${t('localImport')}">${ICON.clip}</button><input type="file" data-import-file accept=".txt,.srt,.vtt,audio/*,video/*" hidden /></div>
+        <div class="bb-cexp" data-exp hidden>
+          <textarea class="bb-input bb-requirements" data-requirements aria-label="${t('requirements')}" placeholder="${t('requirementsHint')}"></textarea>
+          <div class="bb-chips"><select class="bb-chip" data-tpl aria-label="${t('setTplLabel')}">${tplOpts}</select><button class="bb-chip" data-bi>${t('presetBilingual')}</button><button class="bb-chip" data-study>${t('presetStudy')}</button><button class="bb-chip" data-presets>${t('presetSaved')}</button><select class="bb-chip" data-detail aria-label="${t('setDetailLabel')}">${detOpts}</select><button class="bb-chip" data-save-preset>${t('savePreset')}</button></div>
+          <div class="bb-cfoot"><div class="bb-muted" data-warn role="status"></div><button class="bb-btn" data-bookmark title="Enter">${t('saveLink')}</button><button class="bb-btn primary" data-go title="⌘ / Ctrl + Enter">${t('addToQueue')}</button></div>
+        </div>
+      </div><div data-queue class="bb-shelf"></div></div></div></div>`
     const $=s=>root.querySelector(s), urlEl=$('[data-url]'), req=$('[data-requirements]'), goButton=$('[data-go]');let savingBookmark=false
     const fill=()=>{urlEl.value=draft.url || '';req.value=draft.requirements || '';$('[data-tpl]').value=draft.tpl || getSetting('defaultTemplate','通用');$('[data-detail]').value=draft.detail || getSetting('detail','standard')}
     fill()
     const remember=()=>{runtime.drafts[draftKey]={url:urlEl.value,requirements:req.value,tpl:$('[data-tpl]').value,detail:$('[data-detail]').value};persistRuntime()}
-    const check=()=>{const raw=urlEl.value,u=extractUrl(raw);goButton.disabled=!isSupported(u);$('[data-bookmark]').disabled=savingBookmark||!httpLink(u);$('[data-warn]').textContent=!raw?'':!httpLink(u)?t('errInvalidLink'):!isSupported(u)?t('linkOnlyHint'):u!==raw.trim()?t('warnExtracted'):''}
+    let optionsOpen=false
+    const check=()=>{const raw=urlEl.value,u=extractUrl(raw),known=httpLink(u),hasText=!!raw.trim()||!!req.value.trim(),open=optionsOpen||hasText
+      $('[data-exp]').hidden=!open;$('[data-more]').hidden=hasText;$('[data-more]').setAttribute('aria-expanded',String(open))
+      const platform=known?parsePlatform(u).platform:'',fav=PLATFORM_FAVICON[platform],lead=$('[data-platform]')
+      if(lead.dataset.fav!==(fav||'')){lead.dataset.fav=fav||'';lead.innerHTML=fav?`<img src="${fav}" alt="" />`:ICON.link;const img=lead.querySelector('img');if(img)img.onerror=()=>{lead.innerHTML=ICON.link}}
+      $('[data-detected]').textContent=platform?platLabel(platform):''
+      $('[data-bi]').classList.toggle('on',req.value.includes(t('presetBilingualText')));$('[data-study]').classList.toggle('on',req.value.includes(t('presetStudyText')))
+      goButton.disabled=!isSupported(u);$('[data-bookmark]').disabled=savingBookmark||!httpLink(u);$('[data-warn]').textContent=!raw?'':!httpLink(u)?t('errInvalidLink'):!isSupported(u)?t('linkOnlyHint'):u!==raw.trim()?t('warnExtracted'):''}
     homeCheck=check
+    $('[data-more]').onclick=()=>{optionsOpen=!optionsOpen;check();if(optionsOpen)req.focus()}
     root.querySelectorAll('input,textarea,select').forEach(e=>e.addEventListener('input',()=>{remember();check()}))
-    for(const input of [urlEl,req]) input.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)&&!e.isComposing){e.preventDefault();go()}})
+    for(const input of [urlEl,req]) input.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.isComposing)return;if(e.metaKey||e.ctrlKey){e.preventDefault();go()}else if(input===urlEl){e.preventDefault();$('[data-bookmark]').click()}})
     function setRequirement(text,anchor){
-      const apply=append=>{req.value=append?req.value.trim()+'\n\n'+text:text;remember();req.focus();closeMenus()}
+      const apply=append=>{req.value=append?req.value.trim()+'\n\n'+text:text;remember();check();req.focus();closeMenus()}
+      if(req.value.includes(text)){req.value=req.value.replace(text,'').trim();remember();check();return}
       if(!req.value.trim()){apply(false);return}
       const menu=document.createElement('div');menu.className='bb-menu'
       const r=anchor.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(r.left,innerWidth-280))+'px';menu.style.top=r.bottom+4+'px'
@@ -1865,7 +1993,7 @@ function mountAnalyze(el, viewCtx) {
     $('[data-save-preset]').onclick=async()=>{if(!req.value.trim())return;const name=await askStr(t('savePreset'),'');if(name){runtime.presets.push({name,text:req.value});await persistRuntime(true)}}
     $('[data-presets]').onclick=e=>{const anchor=e.currentTarget;const menu=document.createElement('div');menu.className='bb-menu';const r=anchor.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(r.left,innerWidth-280))+'px';menu.style.top=r.bottom+4+'px';for(const item of runtime.presets){const b=document.createElement('button');b.textContent=item.name;b.onclick=()=>setRequirement(item.text,anchor);menu.appendChild(b)}if(!runtime.presets.length)menu.textContent=t('requirementsHint');showMenu(menu)}
     $('[data-go]').onclick=go
-    $('[data-bookmark]').onclick=async()=>{const b=$('[data-bookmark]');if(b.disabled||savingBookmark)return;savingBookmark=true;b.disabled=true;const submittedUrl=urlEl.value,submittedRequirements=req.value;try{await saveLink(submittedUrl,submittedRequirements);if(urlEl.value===submittedUrl)urlEl.value='';if(req.value===submittedRequirements)req.value='';remember();$('[data-warn]').textContent=t('savedLink')}catch(e){say2(t('saveFailed',{msg:String(e?.message||e)}),{level:'error'})}finally{savingBookmark=false;check()}}
+    $('[data-bookmark]').onclick=async()=>{const b=$('[data-bookmark]');if(b.disabled||savingBookmark)return;savingBookmark=true;b.disabled=true;const submittedUrl=urlEl.value,submittedRequirements=req.value;try{await saveLink(submittedUrl,submittedRequirements);if(urlEl.value===submittedUrl)urlEl.value='';if(req.value===submittedRequirements)req.value='';remember();urlEl.focus()}catch(e){say2(t('saveFailed',{msg:String(e?.message||e)}),{level:'error'})}finally{savingBookmark=false;check()}}
     function go(){const url=extractUrl(urlEl.value);if(!isSupported(url))return;const it=qAdd(url,$('[data-tpl]').value,$('[data-detail]').value,req.value);urlEl.value='';req.value='';remember();renderRun(it)}
     $('[data-import]').onclick=()=>{$('[data-import-file]').click()}
     $('[data-import-file]').onchange=async e=>{
@@ -1879,26 +2007,77 @@ function mountAnalyze(el, viewCtx) {
     }
     const generation=openGeneration,scope=playbackScope()
     legacyData().then(found=>{if(disposed||cur.kind!=='home'||generation!==openGeneration||scope!==playbackScope())return;const box=$('[data-legacy]');for(const item of found){const notice=document.createElement('div');notice.className='bb-recovery';const text=document.createElement('p');text.textContent=t(item.error?'legacyReadError':item.currentCount?'legacyCompare':'legacyFound',item);notice.appendChild(text);if(item.error){box.appendChild(notice);continue}const action=document.createElement('button');action.className='bb-btn sm';action.textContent=t('legacyUse');action.onclick=()=>{text.textContent=t('legacyConfirm',item);action.textContent=t('ok');action.onclick=()=>{if(scope===playbackScope())useLegacyFolder(item.folder)}};notice.appendChild(action);box.appendChild(notice)}})
-    check();renderQueue()
+    check();renderQueue();void listReload()
+    bus.emit({type:'nav'})
     runtimeReady.then(()=>{if(cur.kind==='home'&&generation===openGeneration){const saved=runtime.drafts[draftKey];if(saved&&!urlEl.value&&!req.value){Object.assign(draft,saved);fill();check()}}})
   }
 
+  /** 主页三段:进行中、需要你处理、最近整理。空的段不画,全新用户才画空状态。 */
   function renderQueue() {
     const box = root.querySelector('[data-queue]'); if (!box) return
-    const visible=queue.items.filter(it=>belongsHere(it)&&!it.hidden)
-    if (!visible.length) { box.innerHTML = ''; return }
-    box.innerHTML = `
-<div class="bb-panel" style="padding:12px;text-align:left">
-  <div class="bb-row" style="justify-content:space-between;margin-bottom:2px">
-    <span class="bb-label">${t('queueTitle')}</span>
-    ${queue.items.some((i) => i.status === 'completed') ? `<button class="bb-btn ghost sm" data-cleardone>${t('queueClearDone')}</button>` : ''}
-  </div>
-  <div data-qitems></div>
-</div>`
-    const wrap = box.querySelector('[data-qitems]')
-    for (const it of visible) wrap.appendChild(queueRow(it))
-    const cd = box.querySelector('[data-cleardone]'); if (cd) cd.addEventListener('click', qClearDone)
+    const tasks = shownTasks(), running = tasks.filter(isRunning), waiting = tasks.filter(needsYou), taken = new Set([...running, ...waiting].map(taskEntryId))
+    const items = currentIndex().items, links = items.filter((x) => x.kind === 'link' && !taken.has(x.id)), recent = items.filter((x) => x.kind !== 'link' && !taken.has(x.id))
+    const sig = JSON.stringify([listLoaded, listFailed, running.map((i) => [i.id, i.progress > 0, i.title]), waiting.map((i) => [i.id, i.status, qErrText(i), i.saveError, i.title]),
+      links.length, recent.length, links.slice(0, SHELF_ROWS).concat(recent.slice(0, SHELF_ROWS)).map((x) => [x.id, x.title, x.date, x.platform])])
+    // 没变就只走秒表:每秒重建会吞掉按下和松开之间的点击
+    if (box.dataset.sig === sig) { box.querySelectorAll('[data-task-id]').forEach((row) => { const it = qFind(row.dataset.taskId), sub = row.querySelector('.sub'); if (it && sub) sub.textContent = taskSub(it) }); return }
+    box.dataset.sig = sig
+    homeEmpty?.dispose?.(); homeEmpty = null
+    box.textContent = ''
+    if (listFailed) {
+      const bad = document.createElement('div'); bad.className = 'bb-recovery'; bad.textContent = t('indexInvalid') + ' '
+      const again = document.createElement('button'); again.className = 'bb-btn ghost sm'; again.textContent = t('retry'); again.onclick = () => void listReload()
+      bad.appendChild(again); box.appendChild(bad)
+    }
+    const section = (title, count, rows) => {
+      if (!rows.length) return
+      const sec = document.createElement('section'), head = document.createElement('div'), num = document.createElement('span')
+      head.className = 'bb-shelf-h'; head.textContent = title; num.textContent = count; head.appendChild(num); sec.appendChild(head)
+      for (const row of rows) sec.appendChild(row)
+      box.appendChild(sec)
+    }
+    section(t('secRunning'), running.length, running.map(queueRow))
+    const shownLinks = links.slice(0, SHELF_ROWS)
+    section(t('secAttention'), waiting.length + links.length, [...waiting.map(queueRow), ...shownLinks.map((x) => entryShelfRow(x, `${t('savedOnly')} · ${relDate(x.date)}`, '', [[t('organize'), () => void guarded(() => organizeEntry(x.id))], [t('menuDelete'), () => void guarded(() => removeEntry(x.id))]]))]
+      .concat(links.length > shownLinks.length ? [moreRow(links.length - shownLinks.length)] : []))
+    section(t('secRecent'), recent.length, recent.slice(0, SHELF_ROWS).map((x) => entryShelfRow(x, [x.platform ? platLabel(x.platform) : '', x.author].filter(Boolean).join(' · '), relDate(x.date))))
+    if (!box.childElementCount && listLoaded) {
+      const empty = document.createElement('div'); empty.className = 'bb-home-empty'; box.appendChild(empty)
+      homeEmpty = ctx.ui?.mountEmptyState?.(empty, { icon: 'bookmark', title: t('homeEmptyTitle'), line: t('homeEmptyLine') })
+      if (!homeEmpty) empty.textContent = t('homeEmptyLine')
+    }
   }
+  function moreRow(n) { const more = document.createElement('div'); more.className = 'bb-shelf-more'; more.textContent = t('moreItems', { n }); return more }
+  async function organizeEntry(id) {
+    const scope = playbackScope(), claim = scope + '\n' + id
+    if (organizing.has(claim)) return // 读 sidecar 期间按钮还在,连点不能排两个任务
+    organizing.add(claim)
+    try {
+      const full = await loadEntry(id) // 收藏时写的要求在 sidecar 里,这里读不到就别当没写过
+      if (disposed || scope !== playbackScope()) return // 切库后不能把 A 库的内容替换进 B 库的同 id 条目
+      if (!full) { say2(t('entryMissing'), { level: 'error' }); return }
+      renderRun(qAdd(full.sourceUrl || full.meta?.videoUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), full.requirements || '', { replaceEntry: id }))
+    } finally { organizing.delete(claim) }
+  }
+  function entryShelfRow(entry, subText, date, actions = []) {
+    const row = document.createElement('div'); row.className = 'bb-qrow'; row.dataset.entryId = entry.id
+    const fav = PLATFORM_FAVICON[entry.platform], lead = document.createElement('span'); lead.className = 'bb-qlead'
+    if (fav) { const img = document.createElement('img'); img.alt = ''; img.src = fav; img.onerror = () => { lead.innerHTML = ICON.link }; lead.appendChild(img) } else lead.innerHTML = ICON.link
+    const mid = document.createElement('div'); mid.className = 'mid'
+    const ttl = document.createElement('div'); ttl.className = 'ttl'; ttl.textContent = bareUrl(entry.title || entry.videoUrl) || t('libUntitled'); ttl.title = entry.title || ''
+    mid.appendChild(ttl)
+    if (subText) { const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = subText; mid.appendChild(sub) }
+    row.appendChild(lead); row.appendChild(mid)
+    if (date) { const when = document.createElement('span'); when.className = 'bb-qdate'; when.textContent = date; row.appendChild(when) }
+    if (actions.length) {
+      const acts = document.createElement('div'); acts.className = 'acts'
+      for (const [label, run] of actions) { const b = document.createElement('button'); b.className = 'bb-btn ghost sm'; b.textContent = label; b.addEventListener('click', (e) => { e.stopPropagation(); run() }); acts.appendChild(b) }
+      row.appendChild(acts)
+    }
+    row.addEventListener('click', () => openSaved(entry.id))
+    return row
+  }
+  const taskSub = (it) => taskLabel(it) + (['parsing','transcribing','canceling'].includes(it.status) && it.startedAt ? ` · ${Math.round((Date.now() - it.startedAt) / 1000)}s` : '')
 
   /** 队列行(全 DOM 拼装:标题/错误来自模型与网络,一律 textContent 杜绝注入)。 */
   function queueRow(it) {
@@ -1908,10 +2087,9 @@ function mountAnalyze(el, viewCtx) {
     ic.className = 'bb-qic ' + (it.status === 'completed' ? 'ok' : it.status === 'error' ? 'bad' : it.status === 'pending' ? 'wait' : 'spin')
     ic.textContent = it.status === 'completed' ? '✓' : it.status === 'error' ? '✕' : ''
     const mid = document.createElement('div'); mid.className = 'mid'
-    const ttl = document.createElement('div'); ttl.className = 'ttl'; ttl.textContent = it.title || it.url; ttl.title = it.url
+    const ttl = document.createElement('div'); ttl.className = 'ttl'; ttl.textContent = taskTitle(it); ttl.title = it.url
     const sub = document.createElement('div'); sub.className = 'sub'
-    const lbl = it.status === 'pending' ? t('stQueued') : it.status === 'completed' ? t('stDone') : it.status === 'error' ? t('stFailed') : (qStageText(it) || t('stWorking'))
-    sub.textContent = (it.status==='interrupted'?t('interrupted'):it.status==='canceling'?t('canceling'):it.status==='ready'?t('vaultChanged'):lbl) + (active && it.startedAt ? ` · ${Math.round((Date.now() - it.startedAt) / 1000)}s` : '')
+    sub.textContent = taskSub(it)
     mid.appendChild(ttl); mid.appendChild(sub)
     const errText = ['error','interrupted','ready'].includes(it.status) ? qErrText(it) : ''
     if (errText) { const er = document.createElement('div'); er.className = 'err'; er.textContent = errText; er.title = errText; mid.appendChild(er) }
@@ -1924,9 +2102,9 @@ function mountAnalyze(el, viewCtx) {
     const btn = (txt, fn) => { const b = document.createElement('button'); b.className = 'bb-btn ghost sm'; b.textContent = txt; b.addEventListener('click', (e) => { e.stopPropagation(); fn() }); acts.appendChild(b) }
     btn(t('viewLog'),()=>showTaskLog(it.id))
     if(it.status==='interrupted')btn(t('reconnect'),()=>qReconnect(it.id))
-    if(it.status==='error'&&it.errKey!=='cancelUnknown')btn(t('retry'),()=>renderRun(qAdd(it.url,it.tpl,it.detail,it.requirements || '',{importText:it.importText,importAudio:it.importAudio,importTitle:it.importTitle,importSegments:it.importSegments,replaceEntry:it.replaceEntry})))
+    if(canRetry(it))btn(t('retry'),()=>renderRun(retryTask(it)))
     if (it.status === 'completed') btn(t('actView'), () => openRun(it))
-    else if (active) btn(t('cancel'), () => qCancel(it.id))
+    else if (isRunning(it)) btn(t('cancel'), () => qCancel(it.id))
     if (it.status === 'completed' || it.status === 'error') btn(t('actRemove'), () => qRemove(it.id))
     row.appendChild(ic); row.appendChild(mid); row.appendChild(acts)
     row.addEventListener('click', () => openRun(it)) // 点行即看:运行中=直播,完成=结果
@@ -1944,6 +2122,7 @@ function mountAnalyze(el, viewCtx) {
     viewCtx?.setCompanionsVisible?.(!!it.notePath)
     const live = ['pending','parsing','transcribing','canceling'].includes(it.status)
     cur = { kind: 'run', id: it.id, live }
+    bus.emit({ type: 'nav' })
     view = {
       title: it.title || (live ? t('analyzing') : t('platVideo')), summary: it.summary || '', data: it.data,
       sourceUrl: it.url, plat: it.plat, sessionId: it.sessionId, entryId: it.entryId, notePath: it.notePath,
@@ -2284,6 +2463,7 @@ function mountAnalyze(el, viewCtx) {
     if (!full) { say2(t('entryMissing'), { level: 'error' }); renderHome(); return }
     const sourceUrl = full.sourceUrl || (full.meta && full.meta.videoUrl) || ''
     cur = { kind: 'entry', id, live: false }
+    bus.emit({ type: 'nav' })
     view = {
       title: (full.meta && full.meta.title) || '', summary: full.summaryMarkdown || '', kind: full.kind,
       data: { meta: full.meta || {}, segments: full.segments || [], chapters: full.chapters || [], tags: full.tags || [] },
@@ -2299,13 +2479,15 @@ function mountAnalyze(el, viewCtx) {
   }
 
   // ── 总线消费:library 打开请求 / 队列变更 / 直播 token ──
-  const consume = (e) => { if (!e || (e.scope && e.scope !== playbackScope())) return; if (e.fresh) renderHome(); else if (e.entryId) openSaved(e.entryId, e) }
+  const consume = (e) => { if (!e || (e.scope && e.scope !== playbackScope())) return; if (e.fresh) renderHome(); else if (e.runId) { const it = qFind(e.runId); if (it) openRun(it) } else if (e.entryId) openSaved(e.entryId, e) }
   const playbackTarget = { get scope() { return playbackScope() }, native: nativeWorkbench, entryId: () => mediaScope === playbackScope() && cur.kind === 'entry' ? cur.id : null,
+    activeRow: () => { if (cur.kind === 'entry') return cur.id; const it = cur.kind === 'run' && qFind(cur.id); return !it ? null : hasEntryRow(it) ? taskEntryId(it) : 'run:' + it.id },
     visible: () => root.isConnected && root.getClientRects().length > 0, open: ref => openSaved(ref.entryId, { ...ref, playbackOnly: true }) }
   playbackTargets.add(playbackTarget)
   const offBus = bus.on((e) => {
     if (e.type === 'folder-changed' || (e.type==='scope-changed' && cur.kind==='home')) { renderHome(); return }
     if (e.type === 'open') { consume(e); return }
+    if (e.type === 'index') { if (cur.kind === 'home') renderQueue(); return }
     if (e.type === 'renamed') {
       if (cur.kind === 'entry' && cur.id === e.id && view) { view.title = e.title; if (view.data?.meta) view.data.meta.title = e.title; const el = root.querySelector('[data-title]'); if (el) el.textContent = e.title }
       return
@@ -2350,7 +2532,7 @@ function mountAnalyze(el, viewCtx) {
   ensureWorkFolder() // folder 视图可单独打开(状态栏/命令),不能只靠 library 建夹
   if (pendingOpen) { const p = pendingOpen; pendingOpen = null; consume(p) } else renderHome()
 
-  return () => { disposed = true; openGeneration++; playbackTargets.delete(playbackTarget); off(); offBus(); if (offLocale) offLocale(); clearInterval(tick); if (qaController) qaController.abort() } // 队列不随视图死:分析继续、自动落盘
+  return () => { disposed = true; openGeneration++; playbackTargets.delete(playbackTarget); bus.emit({ type: 'nav' }); homeEmpty?.dispose?.(); off(); offBus(); if (offLocale) offLocale(); clearInterval(tick); if (qaController) qaController.abort() } // 队列不随视图死:分析继续、自动落盘
 }
 
 let pendingLogId = null
@@ -2398,25 +2580,8 @@ if (ctx.registerListSource) {
   // ── 统一左栏数据源(宿主 2026-08-25+):把收藏夹整面交给统一工作区 UI 渲染 ──
   // 青鸟只出**数据与动作**,不出 UI:搜索词/选中文件夹由宿主持有并经 items({query,group}) 回传,
   // 故这里对界面状态完全无状态。空间配方(spaces/bluebird/space.json)左栏因此改用 workspace 视图。
-  let lidx = { folders: [], items: [] }, listScope = '', listGeneration = 0
-  const emptyIndex = () => ({ folders: [], items: [] })
-  const currentIndex = () => listScope === playbackScope() ? lidx : emptyIndex()
-  const listSubs = new Set()
-  const fire = () => listSubs.forEach((f) => { try { f() } catch { /* ignore */ } })
-  const listReload = async () => {
-    const scope = playbackScope(), generation = ++listGeneration
-    if (scope !== listScope) { listScope = scope; lidx = emptyIndex(); fire() }
-    let next
-    try { next = (await readIndex()) || emptyIndex() } catch { next = emptyIndex() }
-    if (scope !== playbackScope() || generation !== listGeneration) return
-    lidx = next
-    fire()
-  }
-  void listReload()
-  // 收藏落盘 / 条目改动即刷新(队列进度噪音不重载)
-  bus.on((e) => { if (e.type === 'saved') void listReload() })
   const NONE = '__none' // 「未分类」的分组键(folderId 为空的条目)
-  const guarded = (fn) => fn().catch((error) => say(t('failedPrefix', { msg: (error && error.message) || error }), { level: 'error' }))
+  const caps = ctx.listCapabilities || [], tree = caps.includes('tree'), FOLDER = 'folder:', RUN = 'run:', INDEX_ERROR = 'index-error'
   const folderOptions = (idx) => (idx.folders || []).map((f) => ({ key: f.id, label: f.name }))
   async function createFolder() {
     const name = await askStr(t('promptNewFolder'), '')
@@ -2425,32 +2590,31 @@ if (ctx.registerListSource) {
     await mutateIndex((idx) => { idx.folders.push({ id, name }) }, { allowMissing: true })
     return id
   }
+  async function moveTo(id, to) {
+    let from = null
+    const scope = indexScope()
+    const done = await mutateIndex((idx) => {
+      const row = idx.items.find((x) => x.id === id)
+      if (!row || (to && !idx.folders.some((f) => f.id === to))) return false
+      from = row.folderId || null
+      if (from === to) return false
+      row.folderId = to
+    }, { scope })
+    if (!done) return
+    const name = to ? (currentIndex().folders.find((f) => f.id === to)?.name || '') : t('libNone')
+    say(t('movedEntry', { name }), { level: 'success', key: 'moved-' + id, action: { label: t('undo'), run: () => void guarded(() => mutateIndex((idx) => {
+      const row = idx.items.find((x) => x.id === id)
+      if (!row) return false
+      row.folderId = idx.folders.some((f) => f.id === from) ? from : null
+    }, { scope })) } })
+  }
   async function moveEntry(id) {
     const idx = currentIndex(), hit = (idx.items || []).find((row) => row.id === id)
     if (!hit) return
     let key = await pickOne(t('promptMoveTo'), [{ key: NONE, label: t('libNone') }, ...folderOptions(idx), { key: '__new', label: t('newFolderInMove') }], hit.folderId || NONE)
     if (key === '__new') key = await createFolder()
     if (key === undefined || key === null) return
-    await mutateIndex((next) => {
-      const row = next.items.find((x) => x.id === id)
-      if (!row || (key !== NONE && !next.folders.some((f) => f.id === key))) return false
-      row.folderId = key === NONE ? null : key
-    })
-  }
-  /** 只移出列表:笔记、sidecar 和素材都留着,撤销把同一行放回原位。 */
-  async function removeEntry(id) {
-    let row = null, at = -1
-    const scope = indexScope()
-    const done = await mutateIndex((idx) => {
-      at = idx.items.findIndex((x) => x.id === id)
-      if (at < 0) return false
-      row = idx.items.splice(at, 1)[0]
-    }, { scope })
-    if (!done) return
-    say(t('removedEntry'), { level: 'success', key: 'removed-' + id, action: { label: t('undo'), run: () => void guarded(() => mutateIndex((idx) => {
-      if (idx.items.some((x) => x.id === id)) return false
-      idx.items.splice(Math.min(at, idx.items.length), 0, { ...row, folderId: idx.folders.some((f) => f.id === row.folderId) ? row.folderId : null })
-    }, { scope })) } })
+    await moveTo(id, key === NONE ? null : key)
   }
   async function renameEntry(id, title) {
     const name = String(title || '').replace(/[\r\n]+/g, ' ').trim()
@@ -2474,73 +2638,146 @@ if (ctx.registerListSource) {
     const id = await pickOne(t('chooseFolder'), options)
     if (id === undefined) return
     const action = await pickOne(options.find((o) => o.key === id).label, [{ key: 'rename', label: t('renameFolder') }, { key: 'delete', label: t('deleteFolder') }])
-    if (action === 'rename') {
-      const name = await askStr(t('renameFolder'), options.find((o) => o.key === id).label)
-      if (name) await mutateIndex((idx) => { const f = idx.folders.find((x) => x.id === id); if (!f) return false; f.name = name })
-    } else if (action === 'delete') {
-      let folder = null, at = -1, members = []
-      const scope = indexScope()
-      const done = await mutateIndex((idx) => {
-        at = idx.folders.findIndex((x) => x.id === id)
-        if (at < 0) return false
-        folder = idx.folders.splice(at, 1)[0]
-        members = idx.items.filter((x) => x.folderId === id).map((x) => x.id)
-        for (const row of idx.items) if (row.folderId === id) row.folderId = null
-      }, { scope })
-      if (!done) return
-      say(t('removedFolder', { name: folder.name }), { level: 'success', key: 'removed-folder-' + id, action: { label: t('undo'), run: () => void guarded(() => mutateIndex((idx) => {
-        if (idx.folders.some((x) => x.id === id)) return false
-        idx.folders.splice(Math.min(at, idx.folders.length), 0, folder)
-        for (const row of idx.items) if (members.includes(row.id) && !row.folderId) row.folderId = id
-      }, { scope })) } })
-    }
+    if (action === 'rename') await renameFolder(id, await askStr(t('renameFolder'), options.find((o) => o.key === id).label))
+    else if (action === 'delete') await deleteFolder(id)
   }
+  async function renameFolder(id, name) {
+    if (name) await mutateIndex((idx) => { const f = idx.folders.find((x) => x.id === id); if (!f) return false; f.name = name })
+  }
+  async function deleteFolder(id) {
+    let folder = null, at = -1, members = []
+    const scope = indexScope()
+    const done = await mutateIndex((idx) => {
+      at = idx.folders.findIndex((x) => x.id === id)
+      if (at < 0) return false
+      folder = idx.folders.splice(at, 1)[0]
+      members = idx.items.filter((x) => x.folderId === id).map((x) => x.id)
+      for (const row of idx.items) if (row.folderId === id) row.folderId = null
+    }, { scope })
+    if (!done) return
+    say(t('removedFolder', { name: folder.name }), { level: 'success', key: 'removed-folder-' + id, action: { label: t('undo'), run: () => void guarded(() => mutateIndex((idx) => {
+      if (idx.folders.some((x) => x.id === id)) return false
+      idx.folders.splice(Math.min(at, idx.folders.length), 0, folder)
+      for (const row of idx.items) if (members.includes(row.id) && !row.folderId) row.folderId = id
+    }, { scope })) } })
+  }
+  const matches = (it, q) => !q || String(it.title || '').toLowerCase().includes(q) || String(it.author || '').toLowerCase().includes(q)
+  const entryRow = (it) => ({
+    key: it.id,
+    renamable: true,
+    title: bareUrl(it.title || it.videoUrl) || t('libUntitled'),
+    hint: relDate(it.date),
+    // 行首图标:平台官方 favicon(与详情页/旧侧栏同一张 PLATFORM_FAVICON 表),
+    // 宿主 2026-08-28+ 认 iconUrl。取不到(老宿主 / 断网 / CDN 404)就退下面这行的
+    // 词表键 —— 词表无平台专属图标,故按**内容类型**分:音乐=书签、图文=图片、其余=链接。
+    iconUrl: PLATFORM_FAVICON[it.platform] || undefined,
+    icon: isMusic(it.platform) ? 'bookmark' : it.platform === 'xiaohongshu' ? 'image' : 'link',
+  })
+  const taskRow = (it) => ({ key: RUN + it.id, title: taskTitle(it), subtitle: taskLabel(it), iconUrl: PLATFORM_FAVICON[it.plat?.platform] || undefined, icon: 'clock' })
+  const errorRow = () => listFailed ? [{ key: INDEX_ERROR, title: t('indexInvalid'), icon: 'warning' }] : []
+  /** 文件夹树:文件夹在上,未分类平铺在下。运行中的任务只从 queue 合成,不进索引,崩溃后不留脏行。 */
+  function treeRows(f) {
+    const q = ((f && f.query) || '').trim().toLowerCase()
+    // 智能卡片只传 {query},把行一字排开画,不认文件夹:给它纯收藏。
+    const cardOnly = !!f && 'query' in f && !('group' in f)
+    const idx = currentIndex(), names = new Map(idx.folders.map((x) => [x.id, x.name]))
+    const live = shownTasks().filter((it) => isRunning(it) || needsYou(it))
+    const status = new Map(), loose = []
+    for (const it of live) { if (hasEntryRow(it)) status.set(taskEntryId(it), it); else loose.unshift(it) }
+    // ponytail: 不排序。saveEntry 总把新条目放到数组最前,索引顺序已是收藏时间倒序。
+    const entries = idx.items.filter((it) => matches(it, q)).map((it) => {
+      const named = names.has(it.folderId), task = status.get(it.id)
+      return { ...entryRow(it), draggable: caps.includes('items'), parent: named && !q && !cardOnly ? FOLDER + it.folderId : undefined,
+        subtitle: task ? taskLabel(task) : q && named ? names.get(it.folderId) : undefined }
+    })
+    if (cardOnly) return entries
+    const counts = {}
+    for (const it of idx.items) if (names.has(it.folderId)) counts[it.folderId] = (counts[it.folderId] || 0) + 1
+    const folders = q ? [] : idx.folders.map((x) => ({ key: FOLDER + x.id, kind: 'folder', title: x.name, hint: counts[x.id] ? String(counts[x.id]) : undefined, renamable: true, draggable: caps.includes('items') }))
+    return [...errorRow(), ...folders, ...loose.filter((it) => !q || taskTitle(it).toLowerCase().includes(q)).map(taskRow), ...entries]
+  }
+  /** 拖动落点 → 要做的事;null = 这里放不下。拖到未分类行之间 = 移出文件夹,拖到某文件夹的行之间 = 放进那个文件夹。 */
+  function dropPlan(keys, target) {
+    const key = keys.length === 1 && keys[0], item = target && target.item
+    if (!key || !item) return null
+    if (key.startsWith(FOLDER)) return item.kind === 'folder' && target.position !== 'into' ? { folder: key.slice(FOLDER.length), by: item.key.slice(FOLDER.length), after: target.position === 'after' } : null
+    const row = currentIndex().items.find((x) => x.id === key)
+    if (!row) return null
+    if (item.kind === 'folder' && target.position !== 'into') return null
+    const to = item.kind === 'folder' ? item.key.slice(FOLDER.length) : item.parent ? item.parent.slice(FOLDER.length) : null
+    return to === (row.folderId || null) ? null : { entry: key, to }
+  }
+  async function applyDrop(plan) {
+    if (plan.entry) { await moveTo(plan.entry, plan.to); return }
+    await mutateIndex((idx) => {
+      const from = idx.folders.findIndex((x) => x.id === plan.folder)
+      if (from < 0 || !idx.folders.some((x) => x.id === plan.by)) return false
+      const [moved] = idx.folders.splice(from, 1) // 文件夹顺序就是 folders 数组的顺序,索引结构不用改
+      idx.folders.splice(idx.folders.findIndex((x) => x.id === plan.by) + (plan.after ? 1 : 0), 0, moved)
+    })
+  }
+  const taskMenu = (it) => [
+    ...(it.status === 'interrupted' ? [{ id: 'reconnect', label: t('reconnect'), run: () => void qReconnect(it.id) }] : []),
+    ...(canRetry(it) ? [{ id: 'retry', label: t('retry'), run: () => { retryTask(it) } }] : []),
+    { id: 'log', label: t('viewLog'), run: () => showTaskLog(it.id) },
+    ...(isRunning(it) ? [{ id: 'cancel', label: t('cancel'), danger: true, run: () => void qCancel(it.id) }] : []),
+    ...(needsYou(it) && it.status !== 'interrupted' ? [{ id: 'remove', label: t('actRemove'), danger: true, run: () => qRemove(it.id) }] : []),
+  ]
   ctx.registerListSource({
     id: 'library-list',
     title: t('viewLibrary'),
     intelligent: { description: 'Live Bluebird bookmark library: saved articles, videos and notes. Optional title/author search. Users can open existing entries; this card does not save or analyze links.', viewId: 'folder' },
     search: true,
+    empty: { icon: 'bookmark', title: () => t('homeEmptyTitle'), line: () => t('homeEmptyLine') },
     items: (f) => {
+      if (tree) return treeRows(f)
       const q = ((f && f.query) || '').trim().toLowerCase()
       const g = f && f.group
-      return (currentIndex().items || [])
+      return [...errorRow(), ...(currentIndex().items || [])
         .filter((it) => (g == null ? true : g === NONE ? !it.folderId : it.folderId === g))
-        .filter((it) => !q || String(it.title || '').toLowerCase().includes(q) || String(it.author || '').toLowerCase().includes(q))
-        .map((it) => ({
-          key: it.id,
-          renamable: true,
-          title: it.title || it.videoUrl || t('libUntitled'),
-          hint: it.date || '',
-          // 行首图标:平台官方 favicon(与详情页/旧侧栏同一张 PLATFORM_FAVICON 表),
-          // 宿主 2026-08-28+ 认 iconUrl。取不到(老宿主 / 断网 / CDN 404)就退下面这行的
-          // 词表键 —— 词表无平台专属图标,故按**内容类型**分:音乐=书签、图文=图片、其余=链接。
-          iconUrl: PLATFORM_FAVICON[it.platform] || undefined,
-          icon: isMusic(it.platform) ? 'bookmark' : it.platform === 'xiaohongshu' ? 'image' : 'link',
-        }))
+        .filter((it) => matches(it, q))
+        .map(entryRow)]
     },
-    groups: () => {
+    activeKey: () => { for (const target of playbackTargets) if (target.visible()) { const key = target.activeRow(); if (key) return key } return null },
+    ...(tree ? {} : { groups: () => {
       const c = {}
       for (const it of lidx.items || []) { const k = it.folderId || NONE; c[k] = (c[k] || 0) + 1 }
       const out = (currentIndex().folders || []).map((f) => ({ key: f.id, title: f.name, count: c[f.id] || 0, icon: 'folder' }))
       if (c[NONE]) out.push({ key: NONE, title: t('libNone'), count: c[NONE] })
       return out
+    } }),
+    ...(tree && caps.includes('items') ? { drop: {
+      accepts: ['items'],
+      canDrop: (payload, target) => !!dropPlan(payload.items, target),
+      onDrop: (payload, target) => { const plan = dropPlan(payload.items || [], target); return plan ? guarded(() => applyDrop(plan)) : undefined },
+    } } : {}),
+    actions: [{ id: 'new', label: t('libNew'), primary: true, icon: 'plus', run: () => { pendingOpen = { fresh: true }; bus.emit({ type: 'open', fresh: true }); ctx.openView('folder') } }],
+    groupActions: [{ id: 'new-folder', label: t('newFolder'), run: () => void guarded(createFolder) }, ...(tree ? [] : [{ id: 'manage-folders', label: t('manageFolders'), run: () => void guarded(manageFolders) }])],
+    rename: (item, title) => guarded(() => item.kind === 'folder' ? renameFolder(item.key.slice(FOLDER.length), String(title || '').replace(/[\r\n]+/g, ' ').trim()) : renameEntry(item.key, title)),
+    itemMenu: (item) => {
+      if (item.kind === 'folder') return [{ id: 'delete-folder', label: t('deleteFolder'), danger: true, icon: 'trash', run: () => void guarded(() => deleteFolder(item.key.slice(FOLDER.length))) }]
+      if (item.key === INDEX_ERROR) return []
+      if (item.key.startsWith(RUN)) { const it = qFind(item.key.slice(RUN.length)); return it ? taskMenu(it) : [] }
+      return [
+        { id: 'move', label: t('menuMove'), icon: 'folder-open', run: () => void guarded(() => moveEntry(item.key)) },
+        { id: 'delete', label: t('menuDelete'), danger: true, icon: 'trash', run: () => void guarded(() => removeEntry(item.key)) },
+      ]
     },
-    actions: [{ id: 'new', label: t('libNew'), run: () => { pendingOpen = { fresh: true }; bus.emit({ type: 'open', fresh: true }); ctx.openView('folder') } }],
-    groupActions: [{ id: 'new-folder', label: t('promptNewFolder'), run: () => void guarded(createFolder) }, { id: 'manage-folders', label: t('manageFolders'), run: () => void guarded(manageFolders) }],
-    rename: (item, title) => guarded(() => renameEntry(item.key, title)),
-    itemMenu: (item) => [
-      { id: 'move', label: t('menuMove'), run: () => void guarded(() => moveEntry(item.key)) },
-      { id: 'delete', label: t('menuDelete'), danger: true, run: () => void guarded(() => removeEntry(item.key)) },
-    ],
     // ⚠️订阅时**必重读一次**:插件是在宿主**启动期**激活的(bootstrapEngine 装插件),而 vault 根的
     //   恢复是懒的(ensureAmadeusReady,要等笔记/聊天类视图挂载)—— 上面那次 listReload 几乎必然
     //   撞在「还没有活动库」上,宿主 readFile 此时**静默返回 null**(不抛),于是 lidx 恒空、列表恒空,
     //   只有下一次 'saved' 才救得回来。1.7.x 的自绘面没这毛病:它是每次 mount 都 refresh 一遍。
     //   宿主挂载/切库都会重订阅(WorkspaceView 的 effect 以 vaultRoot 为键),这里顺势重读。
     subscribe: (cb) => { listSubs.add(cb); void listReload(); return () => listSubs.delete(cb) },
-    open: (item) => { if (!currentIndex().items.some((row) => row.id === item.key)) return; pendingOpen = { entryId: item.key }; bus.emit({ type: 'open', entryId: item.key }); ctx.openView('folder') },
+    open: (item) => {
+      if (item.key === INDEX_ERROR) { void listReload(); return }
+      if (item.key.startsWith(RUN)) { const runId = item.key.slice(RUN.length); pendingOpen = { runId }; bus.emit({ type: 'open', runId }); ctx.openView('folder'); return }
+      if (!currentIndex().items.some((row) => row.id === item.key)) return
+      pendingOpen = { entryId: item.key }; bus.emit({ type: 'open', entryId: item.key }); ctx.openView('folder')
+    },
   })
 }
+void listReload()
 
 ctx.registerCommand({ id: 'bluebird-open', title: t('cmdOpen'), keywords: 'bluebird 青鸟 视频 总结 字幕 video summary transcript', run: () => ctx.openView('folder') })
 // 「打开侧栏」= 打开工作台(青鸟 Space 的左栏配方本身就是统一工作区 + 本插件列表源)。
@@ -2555,7 +2792,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 
 if (globalThis.__BLUEBIRD_TEST__) {
   Object.assign(globalThis.__BLUEBIRD_TEST__, { mutateIndex, pageTask, isPageTask, dropRepeatedTitle, saveEntry, upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, saveEntry })
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { relDate, bareUrl, needsYou, isRunning, queue, bus, inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
 return () => { // 插件停用才断分析
