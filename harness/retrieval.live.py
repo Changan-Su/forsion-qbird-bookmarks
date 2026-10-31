@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in network acceptance. Run with Forsion's bundled Python; no cached media.
 python harness/retrieval.live.py --out /tmp/bluebird-retrieval-check
+Add --url for other platforms. Xiaohongshu links need a fresh xsec_token share URL.
 """
 import argparse
 import hashlib
@@ -25,7 +26,12 @@ with tempfile.TemporaryDirectory(prefix='bluebird-network-') as temp:
     assert proc.returncode == 0 and value.get('ok'), value
     assert value['meta']['videoId'] in args.url, value['meta']
     report = {'url': args.url, 'meta': value['meta'], 'source': value['source'], 'diagnostics': value.get('diagnostics')}
-    if value['source'] == 'needs_asr':
+    if value['source'] == 'image_text':
+        # 无音轨视频与图文帖:素材与正文就是全部内容
+        archived = [assets / name for name in value.get('assets', [])]
+        assert archived and all(p.is_file() and p.stat().st_size > 1000 for p in archived), 'No archived media'
+        report['archives'] = [{'name': p.name, 'bytes': p.stat().st_size} for p in archived]
+    elif value['source'] == 'needs_asr':
         audio = Path(value['audio_path'])
         with wave.open(str(audio), 'rb') as wav:
             report['wav'] = {'sampleRate': wav.getframerate(), 'channels': wav.getnchannels(), 'seconds': wav.getnframes()/wav.getframerate()}

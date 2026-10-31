@@ -1,7 +1,10 @@
 import importlib.util
+import json
 import os
 import pathlib
+import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -91,6 +94,72 @@ class RetrievalChecks(unittest.TestCase):
         self.assertTrue(result["error"]["blocked"])
         self.assertNotIn("SECRET", result["error"]["message"])
         self.assertTrue(result["nextActions"])
+
+    def test_silent_video_keeps_the_file_and_never_guesses_when_probing_fails(self):
+        info = {"id": "note/1", "title": "Silent", "duration": 5, "description": "Post text", "formats": [{"url": "u"}]}
+        with tempfile.TemporaryDirectory() as temp:
+            work, assets = pathlib.Path(temp, "work"), pathlib.Path(temp, "assets")
+            work.mkdir()
+            (work/"audio.mp4").write_bytes(b"silent video")
+            probe = types.SimpleNamespace(stdout="video\n")
+            with patch("shutil.which", return_value="/bin/ffprobe"), patch("subprocess.run", return_value=probe):
+                result = module.silent_video_result(info, work, "u", str(assets), {})
+            self.assertEqual(result["source"], "image_text")
+            self.assertEqual(result["text"], "Post text")
+            self.assertEqual(result["assets"], ["bluebird-note_1.mp4"])
+            self.assertEqual((assets/"bluebird-note_1.mp4").read_bytes(), b"silent video")
+            # 平台声明了音频流时,文件里没音轨也是下载出错(B 站曾下到纯视频流)
+            declared = {**info, "formats": [{"url": "u", "acodec": "aac"}]}
+            with patch("shutil.which", return_value="/bin/ffprobe"), patch("subprocess.run", return_value=probe):
+                self.assertIsNone(module.silent_video_result(declared, work, "u", None, {}))
+            # 有音轨、探测失败、没有 ffprobe:都要让原错误上报
+            with patch("shutil.which", return_value="/bin/ffprobe"), patch("subprocess.run", return_value=types.SimpleNamespace(stdout="video\naudio\n")):
+                self.assertIsNone(module.silent_video_result(info, work, "u", None, {}))
+            with patch("shutil.which", return_value="/bin/ffprobe"), patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "ffprobe")):
+                self.assertIsNone(module.silent_video_result(info, work, "u", None, {}))
+            with patch("shutil.which", return_value=None):
+                self.assertIsNone(module.silent_video_result(info, work, "u", None, {}))
+
+    def test_audio_download_always_uses_range_requests(self):
+        seen = {}
+        class Downloader:
+            def __init__(self, options): seen.update(options)
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def extract_info(self, *args, **kwargs): pass
+        with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=Downloader)}):
+            (pathlib.Path(temp)/"audio.wav").write_bytes(b"RIFF")
+            module.download_audio("u", pathlib.Path(temp), {})
+        self.assertGreater(seen["http_chunk_size"], 0)
+
+    def test_audio_download_drops_the_probe_format_selection(self):
+        processed = []
+        class Downloader:
+            def __init__(self, options): pass
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def process_ie_result(self, info, download=False):
+                processed.append(info)
+                return info
+        info = {"formats": [{"url": "a"}], "requested_formats": [{"format_id": "video"}, {"format_id": "audio"}]}
+        with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=Downloader)}):
+            (pathlib.Path(temp)/"audio.wav").write_bytes(b"RIFF")
+            module.download_audio("u", pathlib.Path(temp), {}, info)
+        self.assertTrue(processed and all("requested_formats" not in item for item in processed))
+
+    def test_douyin_share_page_uses_the_page_play_address_and_reports_removed_videos(self):
+        class Page:
+            def __init__(self, html): self.html, self.url = html, "https://www.iesdouyin.com/share/video/123/"
+            def read(self): return self.html.encode()
+        def ydl_for(data):
+            pages = iter([{}, data, data])  # 第一次响应只种 cookie,没有视频数据
+            return types.SimpleNamespace(urlopen=lambda request: Page("<script>window._ROUTER_DATA = %s</script>" % json.dumps(next(pages))))
+        full = {"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": [{"desc": "Clip", "author": {"nickname": "Author"}, "video": {"duration": 8010, "play_addr": {"url_list": ["https://aweme.example/playwm/?video_id=1"]}}}]}}}}
+        info = module.douyin_web_info("https://www.douyin.com/video/123", ydl_for(full))
+        self.assertEqual((info["id"], info["uploader"], info["duration"]), ("123", "Author", 8.01))
+        self.assertEqual(info["formats"][0]["url"], "https://aweme.example/playwm/?video_id=1")
+        with self.assertRaisesRegex(RuntimeError, "unavailable"):
+            module.douyin_web_info("https://www.douyin.com/video/123", ydl_for({"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": []}}}}))
 
 
 if __name__ == "__main__":
