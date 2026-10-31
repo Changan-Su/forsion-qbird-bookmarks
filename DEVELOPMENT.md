@@ -34,7 +34,7 @@
   ◀──SSE token/done(总结正文,AI 由 Tangu 直连 Forsion 完成)──────────────────┘
   │
   ▼  ctx.app.writeFile
-Amadeus 笔记(videos/{日期}-{标题}.md) ──openNote(reuseKey)──▶ 同屏文档 + ChatView 自动引用
+Amadeus 笔记({工作文件夹}/{标题}.md,日期在属性里) ──openNote(reuseKey)──▶ 同屏文档 + ChatView 自动引用
 ```
 
 | 件 | 包内位置 | 干什么 |

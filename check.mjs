@@ -396,8 +396,7 @@ A.equal(writes.length, wN, '已有索引不重复写(幂等)')
 }
 
 // ── 2.0.2 列表源行首图标:平台官方 favicon(iconUrl),取不到才退词表键 ──
-// lidx 是列表源的闭包私有态,外面只能借一条**会 listReload** 的动作把索引灌进去:
-// 删一个不存在的 key = 索引原样重写 + reload,无副作用。
+// lidx 是列表源的闭包私有态,订阅时必重读一次,借它把索引灌进去。
 {
   const LS = reg.listSources.find((x) => x.id === 'library-list')
   V.set(`${T.folderRoot()}/.bluebird-index.json`, JSON.stringify({ folders: [], items: [
@@ -405,8 +404,9 @@ A.equal(writes.length, wN, '已有索引不重复写(幂等)')
     { id: 'i2', title: '网易云单曲', platform: 'netease', date: '2026-08-28' },
     { id: 'i3', title: '不认识的来源', platform: '', date: '2026-08-28' },
   ] }))
-  LS.itemMenu({ key: '__absent__' }).find((a) => a.id === 'delete').run()
+  const offRows = LS.subscribe(() => {})
   await new Promise((r) => setTimeout(r, 10))
+  offRows()
   const rows = LS.items({})
   const by = (k) => rows.find((r) => r.key === k)
   A.equal(rows.length, 3, '列表源应投出三条(索引已灌进去)')
@@ -415,6 +415,88 @@ A.equal(writes.length, wN, '已有索引不重复写(幂等)')
   A.equal(by('i3').iconUrl, undefined, '无平台的条目不给 iconUrl —— 留空才会退到词表图标')
   A.equal(by('i1').icon, 'link', '词表键必须仍在:老宿主不认 iconUrl,靠它兜底')
   A.equal(by('i2').icon, 'bookmark', '音乐的词表兜底仍是书签')
+}
+
+// ── 2.4 列表动作:都在写队列里重读索引;读不到不写;移出只动索引且可撤销 ──
+{
+  const LS = reg.listSources.find((x) => x.id === 'library-list')
+  const path = `${T.folderRoot()}/.bluebird-index.json`, side = `${T.folderRoot()}/.bluebird/e2.json`
+  const notes = [], read = () => JSON.parse(V.get(path)), settle = () => new Promise((r) => setTimeout(r, 10))
+  const seed = { folders: [{ id: 'f1', name: 'Learning' }], items: [{ id: 'e1', title: 'One', folderId: 'f1', notePath: 'n1.md' }, { id: 'e2', title: 'Two', folderId: null, notePath: 'n2.md' }, { id: 'e3', title: 'Three', folderId: null, notePath: 'n3.md' }] }
+  V.set(path, JSON.stringify(seed)); V.set('n2.md', 'keep me'); V.set(side, JSON.stringify({ id: 'e2', meta: { title: 'Two' }, summaryMarkdown: '# Two' }))
+  const notifyBefore = ctx.notify; ctx.notify = (m, o) => notes.push({ m, o })
+  const off = LS.subscribe(() => {}); await settle()
+  A.equal(LS.itemMenu({ key: 'e2' }).find((a) => a.id === 'delete').danger, true, 'remove is a danger action, so the host keeps rename above it')
+  LS.itemMenu({ key: 'e2' }).find((a) => a.id === 'delete').run(); await settle()
+  A.deepEqual(read().items.map((x) => x.id), ['e1', 'e3'])
+  A.equal(V.get('n2.md'), 'keep me', 'removing from the library keeps the note')
+  A.ok(V.has(side), 'removing from the library keeps the sidecar')
+  const undo = notes.at(-1).o.action; A.equal(undo.label, T.t('undo'))
+  undo.run(); await settle()
+  A.deepEqual(read().items.map((x) => x.id), ['e1', 'e2', 'e3'], 'undo restores the original position')
+  undo.run(); await settle()
+  A.equal(read().items.length, 3, 'a second undo does not duplicate the row')
+  await LS.rename({ key: 'e2' }, '  Better\nname '); await settle()
+  A.equal(read().items[1].title, 'Better name'); A.equal(read().items[1].titleEdited, true)
+  A.equal(JSON.parse(V.get(side)).meta.title, 'Better name', 'the sidecar title follows, so the detail header agrees')
+  for (const bad of ['{not json', JSON.stringify({ items: 'nope' })]) {
+    V.set(path, bad); const before = writes.length, errors = notes.length
+    LS.itemMenu({ key: 'e1' }).find((a) => a.id === 'delete').run(); await settle()
+    A.equal(V.get(path), bad, 'an unreadable index is never rewritten')
+    A.equal(writes.length, before); A.equal(notes.length, errors + 1); A.equal(notes.at(-1).o.level, 'error')
+  }
+  V.delete(path); const before = writes.length
+  await A.rejects(T.mutateIndex(() => {}), /索引|index/i, 'a missing index is unknown, not empty')
+  A.equal(writes.length, before); A.ok(!V.has(path))
+  await T.mutateIndex((idx) => { idx.folders.push({ id: 'first', name: 'First' }) }, { allowMissing: true })
+  A.equal(read().folders[0].id, 'first', 'the very first folder may create the index')
+  await T.mutateIndex((idx) => { idx.folders.push({ id: 'second', name: 'Second' }) }, { allowMissing: true })
+  A.equal(read().folders.length, 2, 'a later folder updates the existing index')
+  V.set(path, JSON.stringify(seed)); V.set(side, JSON.stringify({ id: 'e2', meta: { title: 'Two' } }))
+  const offScope = LS.subscribe(() => {}); await settle()
+  const rootBefore = VAULT.root, source = JSON.stringify(seed)
+  LS.itemMenu({ key: 'e2' }).find((a) => a.id === 'delete').run(); await settle()
+  const undoLater = notes.at(-1).o.action, afterRemove = V.get(path)
+  VAULT.root = '/another-library'; undoLater.run(); await settle()
+  A.equal(V.get(path), afterRemove, 'undo never writes into a library the user switched to')
+  A.equal(notes.at(-1).o.level, 'error'); VAULT.root = rootBefore
+  V.set(path, source); const sideBefore = V.get(side), readBefore = ctx.app.readFile
+  ctx.app.readFile = async (p) => { const value = await readBefore(p); if (p === side) VAULT.root = '/another-library'; return value }
+  await LS.rename({ key: 'e2' }, 'Late name'); await settle()
+  ctx.app.readFile = readBefore; VAULT.root = rootBefore
+  A.equal(V.get(side), sideBefore, 'rename does not write a sidecar after the library changed'); A.equal(V.get(path), source)
+  offScope()
+  off(); ctx.notify = notifyBefore; V.delete(path); V.delete(side); V.delete('n2.md')
+}
+
+// ── 2.4 笔记标题只出现一次:文件名是标题,日期进属性,正文不重复同一句 H1 ──
+{
+  A.equal(T.dropRepeatedTitle('# Title\n\nBody', 'Title'), 'Body')
+  A.equal(T.dropRepeatedTitle('## Title\n\nBody', 'Title'), '## Title\n\nBody', 'only a top H1 repeats the file name')
+  A.equal(T.dropRepeatedTitle('Intro\n\n# Title', 'Title'), 'Intro\n\n# Title')
+  const long = 'x'.repeat(80), md = `# ${long}\n\nBody`
+  A.equal(T.dropRepeatedTitle(md, T.deriveTitle(md)), md, 'a truncated file name keeps the full heading')
+  A.equal(T.sanitizeFileName('...hidden'), 'hidden', 'a title cannot become a hidden file')
+  const saved = await T.saveEntry({ kind: 'video', summaryMarkdown: '# 标题一次\n\n正文', sourceUrl: 'https://example.com/a', meta: {}, segments: [], chapters: [], tags: [] })
+  A.equal(saved.notePath, `${T.folderRoot()}/标题一次.md`, 'new notes are named by title, without a date prefix')
+  const text = V.get(saved.notePath)
+  A.ok(new RegExp(`^---[\\s\\S]*\\ndate: ${T.today()}\\n---`).test(text), 'the date moves into the note properties')
+  A.ok(!text.includes('# 标题一次'), 'the body does not repeat the title')
+  A.ok(text.includes('正文'))
+  const idx = JSON.parse(V.get(`${T.folderRoot()}/.bluebird-index.json`)); idx.items[0].folderId = 'kept'; idx.items[0].title = 'My name'; idx.items[0].titleEdited = true
+  V.set(`${T.folderRoot()}/.bluebird-index.json`, JSON.stringify(idx))
+  const again = await T.saveEntry({ id: saved.id, kind: 'video', folderId: null, summaryMarkdown: '# 标题一次\n\n第二版', sourceUrl: 'https://example.com/a', meta: {}, segments: [], chapters: [], tags: [] })
+  const row = JSON.parse(V.get(`${T.folderRoot()}/.bluebird-index.json`)).items.find((x) => x.id === saved.id)
+  A.equal(again.notePath, `${T.folderRoot()}/标题一次-v2.md`, 'organizing again keeps the old note')
+  A.equal(row.folderId, 'kept', 'organizing again keeps the folder'); A.equal(row.title, 'My name', 'organizing again keeps a renamed title')
+  A.equal(JSON.parse(V.get(`${T.folderRoot()}/.bluebird/${saved.id}.json`)).meta.title, 'My name')
+  const plat = (url) => T.parsePlatform(url)
+  A.equal(T.isPageTask({ url: 'https://example.com/a', plat: plat('https://example.com/a') }), true, 'organizing a web page again stays on the page path')
+  A.equal(T.isPageTask({ url: 'https://www.bilibili.com/video/BV1G4Jy6wEok', plat: plat('https://www.bilibili.com/video/BV1G4Jy6wEok') }), false)
+  A.equal(T.isPageTask({ url: 'https://music.163.com/song?id=1', plat: plat('https://music.163.com/song?id=1') }), false)
+  A.equal(T.isPageTask({ url: 'https://example.com/a', importText: 'x', plat: plat('https://example.com/a') }), false)
+  A.match(T.pageTask('https://example.com/x'), /web_fetch: https:\/\/example\.com\/x/)
+  A.ok(!/run_bash,? and|Use the bundled/.test(T.pageTask('https://example.com/x')), 'a web page must not go through the video scripts')
 }
 
 // ── 双语(1.5.0)①词表:两侧键集合必须完全相等;en 侧不许留中文;占位符两侧对齐 ──
@@ -444,7 +526,7 @@ emitLocale()
 A.equal(reg.status[0].text, '🐦 Bluebird', '状态栏项应经 update() 就地换成英文')
 A.equal(reg.status[0].title, 'Open Bluebird')
 A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'saveMedia', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
-A.equal(reg.settings[0].label, 'Default summary template', '设置项标签应跟着切语言(宿主 registerSetting 同 key 覆盖)')
+A.equal(reg.settings[0].label, 'Default template', '设置项标签应跟着切语言(宿主 registerSetting 同 key 覆盖)')
 A.equal(reg.settings[1].label, 'Default detail level (brief/standard/detailed)')
 A.equal(reg.settings[2].label, 'Archive media')
 A.equal(reg.settings[3].label, 'Enhanced auto mode')
@@ -468,14 +550,14 @@ A.equal(reg.settings[3].label, 'Enhanced auto mode')
   A.equal(await T.mirrorLinkMode(), false, '关着且库里没有该文件 → 不许凭空造(没用过本功能的库应保持干净)')
   A.equal(V.has(T.MODE_FILE), false, '上一条不许顺手写出文件')
 }
-A.equal(T.t('queueTitle'), 'Analysis queue', 'en 下 t() 应给英文串')
+A.equal(T.t('queueTitle'), 'Organizing queue', 'en 下 t() 应给英文串')
 A.equal(T.badge('xiaohongshu').textContent, 'Xiaohongshu', 'en 下平台徽标(真 DOM 节点)应渲染英文')
 A.equal(T.wordState(100, 'brief'), 'Too short', 'en 下字数横幅应是英文')
 A.equal(T.stageText(T.stageOf({ type: 'status', payload: { state: 'queued' } }, '').key), 'Queued', 'en 下进度阶段文案应是英文')
 A.equal(T.stageText('stgTool', { name: '' }), 'Running tool', 'en 下工具名兜底也应是英文')
 A.equal(T.tplLabel('学术'), 'Academic', 'en 下模板显示名是英文,而值仍是中文 canonical')
 A.equal(T.detailLabel('detailed'), 'Detailed', 'en 下详细度显示名应是英文')
-A.equal(T.deriveTitle(''), 'Video summary', 'en 下产出标题兜底应是英文')
+A.equal(T.deriveTitle(''), 'Video note', 'en 下产出标题兜底应是英文')
 A.equal(T.t('hintCountOne', { n: 1 }), ' · 1 segment', 'en 下 1 条字幕要用单数(不许硬拼 "1 segments")')
 A.ok(!/[＋]/.test(T.MSG.en.libNew + T.MSG.en.libAddFolder), 'en 侧不许用全角＋(在拉丁文本里撑一格)')
 const enQ = T.qAdd('https://youtu.be/dQw4w9WgXcQ', '通用', 'brief')
@@ -520,7 +602,7 @@ A.equal(T.wordState(100, 'brief'), '字数偏少')
 A.equal(T.tplLabel('学术'), '学术')
 delete ctx.getLocale
 A.equal(T.L(), 'zh', '旧宿主(无 getLocale)必须回退中文 canonical')
-A.equal(T.t('queueTitle'), '分析队列')
+A.equal(T.t('queueTitle'), '整理队列')
 
 // ── Unit / Web: local collection is independent of Server, engine and account ──
 {
