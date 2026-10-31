@@ -70,7 +70,7 @@ A.ok(!reg.views.find((v) => v.id === 'library'), '不应再注册自绘 library 
 A.ok(reg.listSources && reg.listSources.find((x) => x.id === 'library-list'), '应注册 library-list 列表源(统一左栏数据源)')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-open'), '应注册 bluebird-open 命令')
 A.ok(reg.commands.find((c) => c.id === 'bluebird-library'), '应注册 bluebird-library 命令')
-A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail', 'saveMedia'], '应声明四个设置(存储夹已改用宿主标准 workFolder)')
+A.deepEqual(reg.settings.map((s) => s.key).sort(), ['autoSave', 'defaultTemplate', 'detail'], '应声明三个设置(存储夹已改用宿主标准 workFolder,媒体项在自带面板)')
 A.equal(localeSubs.size, 1, '顶层应订一次宿主语言广播(状态栏 + 设置项就地换语言)')
 
 // ── 工作文件夹约定(1.3.0):默认走宿主 workFolder;老宿主退回 videos;saveFolder 一次性迁移 ──
@@ -159,9 +159,23 @@ A.ok(!findAll(box4, 'embed').length && box4.textContent.includes('x.exe'), '认�
 
 // 存档目录:默认开(宿主在「值=默认」时删键 → 判据必须是 !== 'false')
 A.equal(T.mediaSaveDir(), `/Users/x/My Vault/${T.folderRoot()}/assets`, '默认应开启存档,且路径里的空格原样保留')
+// 老用户关过开关 = 不保存;没动过 = 音频;新设的档位优先,且不回写旧键。
+A.equal(T.mediaLevel(), 'audio')
 localStorage.setItem('plugin.bluebird.saveMedia', 'false')
-A.equal(T.mediaSaveDir(), null, '关掉开关就不存档')
+A.equal(T.mediaLevel(), 'none', '关过开关的老用户升级后仍是不保存')
+A.equal(T.mediaSaveDir(), `/Users/x/My Vault/${T.folderRoot()}/assets`, '不保存档也要目录:封面不计入档位')
+localStorage.setItem('plugin.bluebird.mediaLevel', 'video')
+A.equal(T.mediaLevel(), 'video')
+localStorage.setItem('plugin.bluebird.mediaLevel', 'nonsense')
+A.equal(T.mediaLevel(), 'none', '认不出的值退回旧开关,不按缺省覆盖用户的选择')
+localStorage.removeItem('plugin.bluebird.mediaLevel')
 localStorage.setItem('plugin.bluebird.saveMedia', 'true')
+A.equal(T.maxFileMb(), 500)
+A.equal(T.fmtBytes(5983005), '5.7 MB')
+A.equal(T.fmtBytes(1610612736), '1.5 GB')
+A.equal(T.fmtBytes(0), '0 KB')
+A.equal(T.assetKind('a.m4a'), 'audio'); A.equal(T.assetKind('a.mp4'), 'video'); A.equal(T.assetKind('a-01.jpg'), 'image')
+A.deepEqual(T.embeddedAssets('![[Plugins/bluebird/assets/a.mp4]]\n![[b-01.jpg]] [[not.md]]'), ['a.mp4', 'b-01.jpg'])
 VAULT.root = null
 A.equal(T.mediaSaveDir(), null, '云端库/未开库没有本机路径,不能存档')
 VAULT.root = '/Users/x/My Vault'
@@ -453,11 +467,10 @@ A.equal(T.L(), 'en', 'L() 应现读 ctx.getLocale,不缓存')
 emitLocale()
 A.equal(reg.status[0].text, '🐦 Bluebird', '状态栏项应经 update() 就地换成英文')
 A.equal(reg.status[0].title, 'Open Bluebird')
-A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'saveMedia', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
+A.deepEqual(reg.settings.map((s) => s.key), ['defaultTemplate', 'detail', 'autoSave'], '切语言重注册设置不许长出重复行,顺序也不许变')
 A.equal(reg.settings[0].label, 'Default summary template', '设置项标签应跟着切语言(宿主 registerSetting 同 key 覆盖)')
 A.equal(reg.settings[1].label, 'Default detail level (brief/standard/detailed)')
-A.equal(reg.settings[2].label, 'Archive media')
-A.equal(reg.settings[3].label, 'Enhanced auto mode')
+A.equal(reg.settings[2].label, 'Enhanced auto mode')
 
 // ── 增强自动模式:开关必须落进 vault 镜像文件 ───────────────────────────────
 // 引擎进程里的「青鸟链接收藏」技能读不到渲染进程的 localStorage,只能读这个文件。

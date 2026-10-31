@@ -16,12 +16,21 @@ export async function checkBluebirdLive({ run, out }) {
     const response=await run('bluebird-live-silent-'+Date.now(),`Use the bundled Bluebird video analysis skill with host run_bash. Analyze this source: ${silentUrl}
 Default template: General. Default detail: standard.
 Run scripts/transcribe.py to retrieve real source content. If it returns source:needs_asr, return only a bluebird JSON block containing needs_asr:true, audio_path, meta and assets. The host handles speech recognition; do not invent another transcription route. If source:image_text, organize the actual post text/images, not a transcript.
-Pass --save-to ${JSON.stringify(assets)} to transcribe.py. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists.
+Pass --save-to ${JSON.stringify(assets)} --media audio --max-mb 500 to transcribe.py and run it with timeout_ms 1800000, because saving media can take minutes. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists. Copy the script's meta object into your block unchanged, including mediaSkipped when present.
 End with a \`\`\`json bluebird block containing meta.`,300000,{agentSlug:'bluebird',execMode:'host'})
     const text=response.content || ''
     const embed=(/!\[\[(bluebird-[^\]]+\.mp4)\]\]/.exec(text) || [])[1]
     const ok=!response.error&&response.done&&!!embed&&existsSync(join(assets,embed))&&/```(?:json\s+bluebird|bluebird)/i.test(text)&&!/needs_asr/i.test(text)&&!/\[\d{2}:\d{2}\]/.test(text)
     evidence.push({key:'silent-video',ok,embed,response})
+    const capped=await run('bluebird-live-capped-'+Date.now(),`Use the bundled Bluebird video analysis skill with host run_bash. Analyze this source: ${silentUrl}
+Default template: General. Default detail: standard.
+Run scripts/transcribe.py to retrieve real source content. If source:image_text, organize the actual post text/images, not a transcript.
+Pass --save-to ${JSON.stringify(join(out,'capped-assets'))} --media audio --max-mb 0.1 to transcribe.py and run it with timeout_ms 1800000, because saving media can take minutes. Preserve returned assets as ![[filename]] embeds. Copy the script's meta object into your block unchanged, including mediaSkipped when present.
+End with a \`\`\`json bluebird block containing meta.`,300000,{agentSlug:'bluebird',execMode:'host'})
+    const cappedText=capped.content || ''
+    const cappedRaw=(/```(?:json\s+bluebird|bluebird)\s*([\s\S]*?)```/i.exec(cappedText)||[])[1]
+    let cappedData={};try{cappedData=JSON.parse(cappedRaw)}catch{}
+    evidence.push({key:'size-limit',ok:!capped.error&&capped.done&&Number(cappedData.meta?.mediaSkipped)>0&&!/!\[\[[^\]]+\.mp4\]\]/.test(cappedText),response:capped})
     const noSpeech=await run('bluebird-live-no-speech-'+Date.now(),`Load the Bluebird video analysis skill. Do not run scripts or write files. No speech was recognized in this video. Organize only the post text below and do not invent spoken content.
 The author's post text, also source content: "Blender can render ASCII art. Shared the geometry nodes setup and the 3 steps: convert to points, sample colour, swap instances for glyphs."
 Available archived assets: ["bluebird-demo.mp4"]. Preserve them as ![[filename]] embeds.
@@ -36,7 +45,7 @@ End with a \`\`\`json bluebird block containing meta with title and platform xia
     const response=await run('bluebird-live-bgm-'+Date.now(),`Use the bundled Bluebird video analysis skill with host run_bash. Analyze this source: ${bgmUrl}
 Default template: General. Default detail: standard.
 Run scripts/transcribe.py to retrieve real source content. If it returns source:needs_asr, return only a bluebird JSON block containing needs_asr:true, audio_path, meta and assets. The host handles speech recognition; do not invent another transcription route. If source:image_text, organize the actual post text/images, not a transcript.
-Pass --save-to ${JSON.stringify(assets)} to transcribe.py. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists.`,300000,{agentSlug:'bluebird',execMode:'host'})
+Pass --save-to ${JSON.stringify(assets)} --media audio --max-mb 500 to transcribe.py and run it with timeout_ms 1800000, because saving media can take minutes. Preserve returned assets as ![[filename]] embeds. Do not use expiring CDN URLs when a local asset exists. Copy the script's meta object into your block unchanged, including mediaSkipped when present.`,300000,{agentSlug:'bluebird',execMode:'host'})
     const raw=(/```(?:json\s+bluebird|bluebird)\s*([\s\S]*?)```/i.exec(response.content||'')||[])[1]
     let data={};try{data=JSON.parse(raw)}catch{}
     const ok=!response.error&&response.done&&data.needs_asr===true&&!!data.audio_path&&String(data.meta?.description||'').trim().length>0

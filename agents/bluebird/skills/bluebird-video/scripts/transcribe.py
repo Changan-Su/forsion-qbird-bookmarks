@@ -275,10 +275,15 @@ def pick_archive_audio(names):
     return None
 
 
-def archive_media(work_dir, save_to, meta):
-    """把 work_dir 里的原始媒体拷进收藏夹,回文件名列表。存档失败不影响主流程。"""
+def archive_media(work_dir, save_to, meta, max_bytes=None):
+    """把 work_dir 里的原始媒体拷进收藏夹,回文件名列表。存档失败不影响主流程。
+    超过上限时不存,体积记进 meta.mediaSkipped,详情页据此说明原因。"""
     src = pick_archive_audio([i.name for i in work_dir.iterdir() if i.is_file()]) if save_to else None
     if not src:
+        return []
+    size = (work_dir / src).stat().st_size
+    if max_bytes and size > max_bytes:
+        meta["mediaSkipped"] = size
         return []
     dest_dir = Path(save_to)
     name = "bluebird-%s%s" % (safe_stem(meta.get("videoId")), Path(src).suffix.lower())
@@ -291,10 +296,51 @@ def archive_media(work_dir, save_to, meta):
         return []
 
 
-def download_images(urls, save_dir, stem, headers):
+def archive_source(url, info, save_to, meta, headers, level, max_bytes):
+    """单独下一份存档件,和转写用的音频分开,存档失败不影响字幕或转写。"""
+    from yt_dlp import YoutubeDL
+    with tempfile.TemporaryDirectory(prefix="bluebird_archive_") as temp:
+        opts = {
+            "outtmpl": str(Path(temp) / "media.%(ext)s"), "quiet": True, "noprogress": True, "noplaylist": True,
+            "format": "bv*[height<=1080]+ba/b[height<=1080]/b" if level == "video" else "ba/b",
+            "merge_output_format": "mp4", "http_headers": headers, "http_chunk_size": 10485760,
+            "socket_timeout": 45, "retries": 1, "fragment_retries": 1,
+        }
+        if max_bytes:
+            opts["max_filesize"] = max_bytes
+        try:
+            with YoutubeDL(opts) as ydl:
+                selected = ydl.process_ie_result({k: v for k, v in info.items() if k != "requested_formats"}, download=False)
+                expected = sum(f.get("filesize") or f.get("filesize_approx") or 0 for f in selected.get("requested_formats") or [selected])
+                if max_bytes and expected > max_bytes:
+                    meta["mediaSkipped"] = expected
+                    return []
+                ydl.process_ie_result({k: v for k, v in info.items() if k != "requested_formats"}, download=True)
+            return archive_media(Path(temp), save_to, meta, max_bytes)
+        except Exception as exc:
+            print("媒体存档失败(不影响后续):%s" % exc, file=sys.stderr)
+            return []
+
+
+def archive_cover(info, save_to, meta, headers):
+    """封面地址带时效,过期后详情页破图。不占档位;名字固定,插件不用另记。"""
+    url = str(info.get("thumbnail") or "") or next(iter(dedupe_thumbnails(info)), "")
+    if not save_to or not url:
+        return
+    stem = "bluebird-%s-cover" % safe_stem(meta.get("videoId"))
+    for name in download_images([url], Path(save_to), stem, headers):
+        (Path(save_to) / name).replace(Path(save_to) / (stem + ".jpg"))
+
+
+def download_images(urls, save_dir, stem, headers, meta=None, max_bytes=None):
     """图片逐张下,**一张挂掉不许拖垮整条**(帖子里少一张图 ≫ 整篇剪藏失败)。回落盘的文件名。"""
     out = []
-    save_dir.mkdir(parents=True, exist_ok=True)
+    limit = min(MAX_IMAGE_BYTES, max_bytes) if max_bytes else MAX_IMAGE_BYTES
+    try:
+        save_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print("存档目录不可用(跳过):%s" % exc, file=sys.stderr)
+        return out
     for idx, url in enumerate(urls, 1):
         try:
             hdrs = dict(headers)
@@ -302,9 +348,12 @@ def download_images(urls, save_dir, stem, headers):
                 hdrs.setdefault("Referer", "https://www.xiaohongshu.com/")
             req = urllib.request.Request(url, headers=hdrs)
             with urllib.request.urlopen(req, timeout=60) as resp:
-                blob = resp.read(MAX_IMAGE_BYTES + 1)
+                blob = resp.read(limit + 1)
                 ctype = resp.headers.get("Content-Type", "")
-            if not blob or len(blob) > MAX_IMAGE_BYTES:
+                total = int(resp.headers.get("Content-Length") or len(blob))
+            if not blob or len(blob) > limit:
+                if blob and meta is not None and max_bytes and total > max_bytes:
+                    meta["mediaSkipped"] = max(meta.get("mediaSkipped", 0), total)
                 continue
             name = "%s-%02d%s" % (stem, idx, image_ext(ctype, url))
             (save_dir / name).write_bytes(blob)
@@ -341,7 +390,7 @@ def dedupe_thumbnails(info):
     return out
 
 
-def image_post_result(info, fallback_url, save_dir=None, headers=None):
+def image_post_result(info, fallback_url, save_dir=None, headers=None, max_bytes=None):
     """图文帖:图 + 正文就是全部内容,没有音轨可转写。"""
     images = dedupe_thumbnails(info)
     meta = build_meta(info, fallback_url)
@@ -353,7 +402,7 @@ def image_post_result(info, fallback_url, save_dir=None, headers=None):
            "note": "图文帖:没有音轨,图片与正文已抓好,不需要转写"}
     if save_dir and images:
         out["assets"] = download_images(images, Path(save_dir),
-                                        "bluebird-" + safe_stem(meta.get("videoId")), headers or {})
+                                        "bluebird-" + safe_stem(meta.get("videoId")), headers or {}, meta, max_bytes)
     return out
 
 
@@ -370,7 +419,7 @@ def has_no_audio_stream(path):
     return "video" in kinds and "audio" not in kinds
 
 
-def silent_video_result(info, work_dir, fallback_url, save_to, headers):
+def silent_video_result(info, work_dir, fallback_url, save_to, headers, max_bytes=None):
     """无音轨视频:平台元数据说不清(acodec 为空),只有下载后才知道。没有语音可转写,
     视频本身 + 正文就是全部内容,和图文帖同一条路;抽音频失败不等于抓取失败。"""
     if any((f.get("acodec") or "none") != "none" for f in info.get("formats") or []):
@@ -379,7 +428,7 @@ def silent_video_result(info, work_dir, fallback_url, save_to, headers):
     if not src or not has_no_audio_stream(work_dir / src):
         return None
     out = image_post_result(info, fallback_url, save_to, headers)
-    assets = archive_media(work_dir, save_to, out["meta"]) + out.get("assets", [])
+    assets = archive_media(work_dir, save_to, out["meta"], max_bytes) + out.get("assets", [])
     if assets:
         out["assets"] = assets
     out["note"] = "无音轨视频:没有语音可转写,视频封面与正文已抓好"
@@ -575,7 +624,9 @@ def douyin_web_info(url, ydl):
     }
 
 
-def run(url, save_to=None):
+def run(url, save_to=None, level="audio", max_mb=None):
+    max_bytes = int(max_mb * 1048576) if max_mb else None
+    media_dir = None if level == "none" else save_to  # 「不保存」时只留封面
     try:
         from yt_dlp import YoutubeDL
     except ImportError as exc:
@@ -614,17 +665,22 @@ def run(url, save_to=None):
                 info = ydl.extract_info(url, download=False, process=False)
             if info.get("formats") or info.get("url") or info.get("duration"):
                 raise RetrievalError("metadata", exc) from exc
-            return image_post_result(info, url, save_to, headers)
+            return image_post_result(info, url, media_dir, headers, max_bytes)
         meta = build_meta(info, url)
+        archive_cover(info, save_to, meta, headers)
         segments, lang = extract_subtitles(info, work_dir, langs, headers)
         if segments:
-            return {"ok": True, "source": "native", "lang": lang, "meta": meta,
-                    "text": "\n".join(s["text"] for s in segments), "segments": segments}
+            out = {"ok": True, "source": "native", "lang": lang, "meta": meta,
+                   "text": "\n".join(s["text"] for s in segments), "segments": segments}
+            assets = archive_source(url, info, media_dir, meta, headers, level, max_bytes) if media_dir else []
+            if assets:
+                out["assets"] = assets
+            return out
 
         # 图文帖:时长 0 且确有图/正文。附加条件是防线 —— 光看 duration==0 会把「元数据缺时长的视频」
         # 误判成图文帖,那样会静默交出一份没有内容的空卡。
         if not (info.get("formats") or info.get("url")) and int(info.get("duration") or 0) == 0 and (dedupe_thumbnails(info) or info.get("description")):
-            return image_post_result(info, url, save_to, headers)
+            return image_post_result(info, url, media_dir, headers, max_bytes)
         # 有时长却没有任何流 = 地区限制/已删/需登录,不是图文帖。ignore_no_formats_error 让它也回 info
         # 而不是抛,所以这里得自己拦 —— 掉进下面去下音频只会得到一句难懂的 ffmpeg 报错。
         if not (info.get("formats") or info.get("url")):
@@ -638,13 +694,16 @@ def run(url, save_to=None):
             audio = download_audio(url, work_dir, headers, info)
         except Exception as exc:
             # 视频已下到 work_dir、只是抽不出音轨:这种帖子没有语音,不算抓取失败
-            silent = silent_video_result(info, work_dir, url, save_to, headers)
+            silent = silent_video_result(info, work_dir, url, media_dir, headers, max_bytes)
             if silent:
                 return silent
             # 上面 duration 闸没拦住的图文帖会在这里现形(帖子报了假的流)
             raise RetrievalError("media", exc) from exc
         # 存档在搬走 wav 之前做:原始压缩音频还躺在 work_dir 里,finally 会把整个目录删掉
-        assets = archive_media(work_dir, save_to, meta)
+        names = [i.name for i in work_dir.iterdir() if i.is_file()]
+        has_video = (pick_archive_audio(names) or "").endswith((".mp4", ".m4v", ".mov"))
+        assets = archive_source(url, info, media_dir, meta, headers, level, max_bytes) if media_dir and level == "video" and not has_video \
+            else archive_media(work_dir, media_dir, meta, max_bytes)
 
         keep_fd, keep_path = tempfile.mkstemp(prefix=f"bluebird-asr-{safe_stem(meta.get('videoId'))}-", suffix=".wav")
         os.close(keep_fd)
@@ -716,9 +775,11 @@ def selftest():
     assert normalize_url("https://example.com/user/profile/abc1/6ad8") == "https://example.com/user/profile/abc1/6ad8"
     assert is_xhs_host("xhslink.cn") and is_xhs_host("www.xiaohongshu.com") and not is_xhs_host("notxiaohongshu.com")
     # 参数解析:路径带空格必须完整拿到
-    assert parse_args(["https://x/a", "--save-to", "/Users/a b/收藏夹/assets"]) == ("https://x/a", "/Users/a b/收藏夹/assets")
-    assert parse_args(["--save-to=/tmp/x", "https://x/a"]) == ("https://x/a", "/tmp/x")
-    assert parse_args(["https://x/a"]) == ("https://x/a", None)
+    assert parse_args(["https://x/a", "--save-to", "/Users/a b/收藏夹/assets"]) == ("https://x/a", "/Users/a b/收藏夹/assets", "audio", None)
+    assert parse_args(["--save-to=/tmp/x", "https://x/a"]) == ("https://x/a", "/tmp/x", "audio", None)
+    assert parse_args(["https://x/a"]) == ("https://x/a", None, "audio", None)
+    assert parse_args(["https://x/a", "--media", "video", "--max-mb", "500"]) == ("https://x/a", None, "video", 500.0)
+    assert parse_args(["https://x/a", "--media", "x", "--max-mb", "0"]) == ("https://x/a", None, "audio", None)
     # 有时长但没有流 ≠ 图文帖(ignore_no_formats_error 之后它也会回 info,不能当图文处理)
     assert not (int({"duration": 300, "formats": []}.get("duration") or 0) == 0), "有时长就不该进图文档"
     assert is_image_post_error(Exception("ERROR: No video formats found!"))
@@ -728,8 +789,9 @@ def selftest():
 
 
 def parse_args(argv):
-    """→ (url, save_to)。`--save-to <绝对目录>` 缺省 None = 只抓不存(TUI 里直接调本脚本时的形态)。"""
-    url, save_to, i = None, None, 0
+    """→ (url, save_to, level, max_mb)。`--save-to <绝对目录>` 缺省 None = 只抓不存(TUI 里直接调本脚本时的形态)。
+    `--media none|audio|video` 是保存档位,认不出时按 audio;`--max-mb` 是单文件上限,缺省不限。"""
+    url, save_to, level, max_mb, i = None, None, "audio", None, 0
     while i < len(argv):
         a = argv[i]
         if a == "--save-to":
@@ -737,10 +799,19 @@ def parse_args(argv):
             save_to = argv[i] if i < len(argv) else None
         elif a.startswith("--save-to="):
             save_to = a.split("=", 1)[1]
+        elif a == "--media":
+            i += 1
+            level = argv[i] if i < len(argv) and argv[i] in ("none", "audio", "video") else "audio"
+        elif a == "--max-mb":
+            i += 1
+            try:
+                max_mb = float(argv[i]) if i < len(argv) and float(argv[i]) > 0 else None
+            except ValueError:
+                max_mb = None
         elif url is None:
             url = a
         i += 1
-    return url, (save_to or None)
+    return url, (save_to or None), level, max_mb
 
 
 def main():
@@ -754,10 +825,10 @@ def main():
     if len(args) == 2 and args[0] == "--local-file":
         print(json.dumps(local_result(args[1]), ensure_ascii=False))
         return
-    url, save_to = parse_args(args)
+    url, save_to, level, max_mb = parse_args(args)
     if not url or not url.strip():
         raise ValueError('用法: python transcribe.py <video_url> [--save-to "<绝对目录>"]')
-    result = run(url.strip(), save_to)
+    result = run(url.strip(), save_to, level, max_mb)
     result["diagnostics"] = diagnostics()
     print(json.dumps(result, ensure_ascii=False))
 
