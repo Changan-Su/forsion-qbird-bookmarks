@@ -40,7 +40,7 @@ End with a \`\`\`json bluebird block containing meta with title and platform xia
     const contentBeforeQuestions=body.split(/##.*(?:自测|Self.Test)/i)[0]
     const englishSentences=contentBeforeQuestions.split('\n').filter(line=>(line.match(/[A-Za-z]+/g)||[]).length>=9).length
     const fullParallel=item.key!=='bilingual'||englishSentences>=2
-    const explicitQuestions=(body.match(/\*\*Question[^*]*\*\*/gi)||[]).length
+    const explicitQuestions=(body.match(/\*\*(?:\d+\.\s*)?Question[^*]*\*\*/gi)||[]).length
     const questionCount=explicitQuestions || (body.match(/^\d+\.\s/gm)||[]).length
     const countCorrect=questionCount===(item.key==='bilingual'?5:3)
     const ok=!response.error&&response.done&&loaded&&noFetch&&format&&language&&fullParallel&&countCorrect&&/17/.test(text)
