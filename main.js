@@ -409,7 +409,7 @@ function archivedAssetUrl(name) {
   return `amadeus-asset://v/${encodeURIComponent(path)}`
 }
 
-const fmtBytes = (n) => n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= 1048576 ? `${(n / 1048576).toFixed(n >= 104857600 ? 0 : 1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+const fmtBytes = (n) => n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= 1048576 ? `${(n / 1048576).toFixed(n >= 104857600 ? 0 : 1)} MB` : `${n ? Math.max(1, Math.round(n / 1024)) : 0} KB`
 const assetKind = (name) => /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : /\.(mp3|wav|ogg|m4a|flac|aac|opus)$/i.test(name) ? 'audio' : 'image'
 /** 资源协议的响应头里就有大小,不用读文件。→ {bytes} / {missing:true} / null(不知道,不能当成没有)。 */
 async function assetSize(name) {

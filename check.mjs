@@ -173,6 +173,7 @@ localStorage.setItem('plugin.bluebird.saveMedia', 'true')
 A.equal(T.maxFileMb(), 500)
 A.equal(T.fmtBytes(5983005), '5.7 MB')
 A.equal(T.fmtBytes(1610612736), '1.5 GB')
+A.equal(T.fmtBytes(0), '0 KB')
 A.equal(T.assetKind('a.m4a'), 'audio'); A.equal(T.assetKind('a.mp4'), 'video'); A.equal(T.assetKind('a-01.jpg'), 'image')
 A.deepEqual(T.embeddedAssets('![[Plugins/bluebird/assets/a.mp4]]\n![[b-01.jpg]] [[not.md]]'), ['a.mp4', 'b-01.jpg'])
 VAULT.root = null
