@@ -34,7 +34,7 @@
   ◀──SSE token/done(总结正文,AI 由 Tangu 直连 Forsion 完成)──────────────────┘
   │
   ▼  ctx.app.writeFile
-Amadeus 笔记(videos/{日期}-{标题}.md) ──openNote(reuseKey)──▶ 同屏文档 + ChatView 自动引用
+Amadeus 笔记({工作文件夹}/{标题}.md,日期在属性里) ──openNote(reuseKey)──▶ 同屏文档 + ChatView 自动引用
 ```
 
 | 件 | 包内位置 | 干什么 |
@@ -117,3 +117,7 @@ PLUGIN_LEGACY_NESTED=1 PLUGIN_PRIOR_JOURNAL=interrupted BLUEBIRD_DESKTOP=/absolu
 ```
 
 复验前序索引已提交但日志未完成的情况：同时设置上述两个环境变量；全程使用隔离智库。
+
+## Real-window check
+
+`BLUEBIRD_DESKTOP=<built desktop> node harness/essentials.e2e.cjs` drives a real Electron window with a stub engine and an isolated home, including real drags that are read back from the index on disk. `BLUEBIRD_LEGACY_HOST=1` hides `ctx.listCapabilities` to check the fallback filter list. `BLUEBIRD_PLUGIN=<old checkout>` is the negative control. Run it under `devlock` from the workspace root.
