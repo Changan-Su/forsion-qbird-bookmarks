@@ -20,7 +20,7 @@ async function main(){
  const asr="const r = await tg.transcribeAudioFile(audioPath, { timestamps: true })";assert.ok(src.includes(asr))
  src=src.replace(asr,"const r = { text:'.', segments:[{ start:0, end:21, text:'.' }] }")
  const at=src.lastIndexOf('return () => {')
- fs.writeFileSync(path.join(pdir,'main.js'),src.slice(0,at)+`globalThis.__bb={ctx,queue,qAdd,bus,mountMediaSettings,openStorage,mediaGroups,reg:()=>ctx,open:id=>{pendingOpen={entryId:id};bus.emit({type:'open',entryId:id});ctx.openView('folder')}};\n`+src.slice(at))
+ fs.writeFileSync(path.join(pdir,'main.js'),src.slice(0,at)+`globalThis.__bb={ctx,queue,qAdd,bus,mountMediaSettings,openStorage,mediaGroups,removeEntry,readIndex,reg:()=>ctx,open:id=>{pendingOpen={entryId:id};bus.emit({type:'open',entryId:id});ctx.openView('folder')}};\n`+src.slice(at))
  const stub=await startStubEngine({models:[{id:'fixture',name:'Fixture model',provider:'stub'}]})
  for(const content of [silentNote,asrAsk,musicNote])stub.script([{type:'status',payload:{state:'running'}},{type:'done',payload:{content}}])
  for(const d of [userData,userData+'-dev']){fs.mkdirSync(d,{recursive:true});for(const f of ['amadeus-config.json','amadeus-config.dev.json'])fs.writeFileSync(path.join(d,f),JSON.stringify({lastVault:vault,localVault:vault}));fs.writeFileSync(path.join(d,'tangu-desktop-config.json'),JSON.stringify({mode:'external',backendUrl:stub.url,token:'mock'}))}
@@ -91,6 +91,19 @@ async function main(){
   await win.waitForFunction(()=>/读取失败/.test(document.querySelector('[data-store-state]')?.textContent||''),null,{timeout:15000})
   check('an unreadable entry blocks cleanup',await win.evaluate(()=>document.querySelector('[data-store-trash]').style.display==='none'&&document.querySelector('.bb-store-row input').disabled))
   fs.writeFileSync(musicEntry,musicData)
+  // Removing a bookmark offers to trash only the files nothing else uses; the bookmark leaves the index either way.
+  execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','color=c=red:s=64x64:d=1','-pix_fmt','yuv420p',path.join(assets,'bluebird-own.mp4')])
+  stub.script([{type:'status',payload:{state:'running'}},{type:'done',payload:{content:'# Own clip\n\n![[bluebird-own.mp4]]\n\n## 正文\n\nPost text\n\n'+block({meta:{title:'Own clip',platform:'xiaohongshu'}})}}])
+  const mine=await run('https://www.xiaohongshu.com/explore/own')
+  const own=(await win.evaluate(()=>__bb.mediaGroups())).find(g=>g.files.includes('bluebird-own.mp4'))
+  check('a bookmark with its own file',mine.status==='completed'&&own&&own.entries.length===1&&own.entries[0]===mine.entryId)
+  const removing=win.evaluate(id=>__bb.removeEntry(id),mine.entryId)
+  await win.waitForSelector('dialog.plugin-dialog[open]',{timeout:10000})
+  check('removing a bookmark asks about its own media files',/同时移除媒体文件/.test(await win.locator('dialog.plugin-dialog').innerText()))
+  await win.locator('dialog.plugin-dialog button',{hasText:'一并移除'}).click()
+  await removing
+  check('the removed bookmark leaves the index',!(await win.evaluate(()=>__bb.readIndex())).items.some(x=>x.id===mine.entryId))
+  check('its own files move to the trash',!fs.existsSync(path.join(assets,'bluebird-own.mp4')))
   fs.unlinkSync(path.join(assets,'bluebird-silent.mp4'))
   await win.evaluate(id=>__bb.open(id),silent.entryId)
   await win.waitForFunction(()=>/未保存/.test(document.querySelector('[data-media-strip]')?.textContent||''),null,{timeout:15000})
