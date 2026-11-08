@@ -187,6 +187,16 @@ A.ok(/youtube-nocookie\.com\/embed\/dQw4w9WgXcQ/.test(yt.embed(0)), 'YouTube 应
 A.ok(/start=90&autoplay=1/.test(yt.embed(90)), 'seek 应带 start 跳转并即播')
 A.ok(!/autoplay/.test(yt.embed(0)), '首载不自动播放')
 const bili = T.parsePlatform('https://www.bilibili.com/video/BV1xx411c7mD')
+{ // 「要登录」只认 B 站:脚本的 blocked 优先,模型没转述时按报错原文认
+  const b = { plat: { platform: 'bilibili' } }, y = { plat: { platform: 'youtube' } }
+  A.ok(T.isLoginWall(b, { blocked: true, message: 'x' }), 'blocked flag means login wall')
+  A.ok(T.isLoginWall(b, { message: 'Bilibili full media is unavailable (login, preview or restricted content)' }), 'script login text means login wall')
+  A.ok(T.isLoginWall(b, { message: 'HTTP Error 412: Precondition Failed' }), '412 means login wall')
+  A.ok(T.isLoginWall(b, { message: 'Bilibili metadata denied: -352 风控校验失败' }), '-352 means login wall')
+  A.ok(!T.isLoginWall(b, { message: 'Unsupported Bilibili video URL' }), 'bad URL is not a login wall')
+  A.ok(!T.isLoginWall(y, { blocked: true, message: 'Sign in to confirm your age' }), 'only Bilibili offers the connect card')
+  A.ok(!T.isLoginWall(b, null), 'no error is not a login wall')
+}
 A.equal(bili.platform, 'bilibili')
 A.ok(/player\.bilibili\.com\/player\.html\?bvid=BV1xx411c7mD/.test(bili.embed(0)), 'Bilibili 应给 player.bilibili.com 内嵌地址(宿主 CSP 已放行)')
 A.ok(/&t=90&autoplay=1/.test(bili.embed(90)), 'Bilibili seek 应带 &t= 并即播')

@@ -40,7 +40,7 @@ Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-r
 
 - **yt-dlp**:运行 Tangu 的环境需能 `pip install yt-dlp`(技能会按需自动装;平台改版失效时升级它)。
 - **ffmpeg**:仅「无字幕 → ASR 兜底」路径需要(下载音频转 mp3)。只分析有字幕的视频则不需要。
-- **语音识别**:无原生字幕的视频走 Forsion 自己的语音链路(设置 → 语音:本地离线模型 / 自带 key 的 provider / Forsion 云),**不需要给本插件配 ASR key**;要抠音频则系统需装 `ffmpeg`。B 站高清/会员可设 `BLUEBIRD_COOKIE`。
+- **语音识别**:无原生字幕的视频走 Forsion 自己的语音链路(设置 → 语音:本地离线模型 / 自带 key 的 provider / Forsion 云),**不需要给本插件配 ASR key**;要抠音频则系统需装 `ffmpeg`。B 站高清 / 会员 / 被风控的视频:在「平台账号」里连接 B 站(桌面 2.13.8+,扫 B 站自己的二维码),登录信息只在 Forsion 内置浏览器里,获取时经引擎 `secret_env` 交给脚本,不经模型。
 
 ## 用法
 

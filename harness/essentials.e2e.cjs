@@ -11,6 +11,16 @@ const {skipOnboarding}=require(DESK+'/scripts/lib/skip-onboarding.cjs')
 fs.mkdirSync(OUT,{recursive:true})
 const FOLDER='Plugins/bluebird'
 const answer=(title,platform,url)=>`# ${title}\n\n## Key point\n\nFixture body for ${title}.\n\n\`\`\`json bluebird\n${JSON.stringify({meta:{title,platform,videoId:'',videoUrl:url},segments:[],chapters:[],tags:[]})}\n\`\`\``
+// 宿主的平台账号接口换成假的:真登录要用户自己的 B 站账号,台架只验插件这半(状态、失败卡、带登录重试、账号页)。
+// 真宿主那半(内置浏览器分区读写、授权框)在 Genesis 的 platformAccounts.test.ts。
+const FAKE_ACCOUNTS=`const __acc={state:'none',name:'',calls:[],cookieReads:0};globalThis.__acc=__acc;
+ctx=Object.create(ctx,{app:{value:Object.create(ctx.app,{platformAccounts:{value:{platforms:()=>['bilibili'],
+status:async()=>({platform:'bilibili',state:__acc.state,...(__acc.name?{name:__acc.name}:{})}),
+connect:async()=>{__acc.calls.push('connect');__acc.state='connected';__acc.name='Reader';return {platform:'bilibili',state:'connected',name:'Reader'}},
+pasteCookie:async(p,t)=>{__acc.calls.push('paste');if(!/SESSDATA=/.test(t))return {platform:'bilibili',state:'invalid'};__acc.state='connected';__acc.name='';return {platform:'bilibili',state:'connected'}},
+disconnect:async()=>{__acc.calls.push('disconnect');__acc.state='none';__acc.name='';return {platform:'bilibili',state:'none'}},
+cookie:async()=>{__acc.cookieReads++;return __acc.state==='connected'?'SESSDATA=fixture-secret-123; bili_jct=j':null}}}})}});
+`
 const run=(content,delay=0)=>[{type:'status',payload:{state:'running'}},{type:'done',payload:{content},...(delay?{delay}:{})}]
 const wait=ms=>new Promise(r=>setTimeout(r,ms))
 
@@ -27,7 +37,7 @@ async function main(){
  const pdir=path.join(home,'plugins','bluebird');fs.mkdirSync(pdir,{recursive:true})
  for(const f of ['main.js','manifest.json','spaces','agents','skills','icon.png'])fs.cpSync(path.join(ROOT,f),path.join(pdir,f),{recursive:true})
  const src=fs.readFileSync(path.join(pdir,'main.js'),'utf8'),at=src.lastIndexOf('return () => {')
- fs.writeFileSync(path.join(pdir,'main.js'),(LEGACY?'ctx=Object.create(ctx,{listCapabilities:{value:undefined}});\n':'')+src.slice(0,at)+`globalThis.__bb={ctx,bus,queue,runtimeReady,open:(id)=>{pendingOpen={entryId:id};bus.emit({type:'open',entryId:id});ctx.openView('folder')}};\n`+src.slice(at))
+ fs.writeFileSync(path.join(pdir,'main.js'),(LEGACY?'ctx=Object.create(ctx,{listCapabilities:{value:undefined}});\n':FAKE_ACCOUNTS)+src.slice(0,at)+`globalThis.__bb={ctx,bus,queue,runtimeReady,open:(id)=>{pendingOpen={entryId:id};bus.emit({type:'open',entryId:id});ctx.openView('folder')}};\n`+src.slice(at))
  const stub=await startStubEngine({models:[{id:'fixture',name:'Fixture',provider:'stub'}]})
  for(const d of [userData,userData+'-dev']){fs.mkdirSync(d,{recursive:true});for(const f of ['amadeus-config.json','amadeus-config.dev.json'])fs.writeFileSync(path.join(d,f),JSON.stringify({lastVault:vault,localVault:vault}));fs.writeFileSync(path.join(d,'tangu-desktop-config.json'),JSON.stringify({mode:'external',backendUrl:stub.url,token:'fixture'}))}
  const results=[];const check=(name,ok,detail='')=>{results.push({name,ok:!!ok,detail});console.log(ok?'PASS':'FAIL',name,detail)}
@@ -373,6 +383,53 @@ async function main(){
   await win.screenshot({path:path.join(OUT,'tree-open.png')})
   await win.evaluate(()=>{const r=document.documentElement;r.dataset.mode='dark';r.classList.add('dark')});await wait(400)
   await win.screenshot({path:path.join(OUT,'tree-dark.png')})
+  })
+  await section('13 B 站账号',async()=>{
+  // 13 B 站账号:收藏时提示、要登录的失败卡、连接后带登录重试、账号页
+  await win.evaluate(()=>{const r=document.documentElement;r.dataset.mode='light';r.classList.remove('dark')})
+  await goHome()
+  const BV='https://www.bilibili.com/video/BV1xx411c7mD'
+  await win.locator('[data-url]').fill(BV);await wait(600)
+  check('a Bilibili link says the account is not connected',await win.locator('[data-acct-hint]').isVisible()&&(await win.locator('[data-acct-hint]').innerText()).includes('B 站未连接'))
+  await win.locator('[data-url]').fill('https://www.douyin.com/video/7x');await wait(300)
+  check('other platforms show no account hint',!await win.locator('[data-acct-hint]').isVisible())
+  const from=stub.seen.runs.length
+  stub.script(run('```json bluebird\n'+JSON.stringify({error:{stage:'media',message:'Bilibili full media is unavailable (login, preview or restricted content)',code:'',blocked:true}})+'\n```'))
+  await win.locator('[data-url]').fill(BV);await win.locator('[data-go]').click()
+  await win.waitForFunction(()=>__bb.queue.items.some(it=>it.needLogin==='bilibili'),null,{timeout:15000});await wait(1200)
+  const first=stub.seen.runs[from]||{}
+  check('without an account the run carries no secret',!first.secretEnv&&!String(first.message||'').includes('BLUEBIRD_COOKIE is already set'),JSON.stringify(first.secretEnv||null))
+  check('the failure says Bilibili needs sign-in',await visibleText('B 站要求登录后才能获取这条视频'))
+  check('the failure offers Connect Bilibili',await win.locator('.bb-reader .bb-r-progress button',{hasText:'连接 B 站'}).isVisible())
+  await win.screenshot({path:path.join(OUT,'login-needed.png')})
+  await win.locator('.bb-reader .bb-r-progress button',{hasText:'连接 B 站'}).click();await wait(800)
+  check('connecting asks the host once',(await win.evaluate(()=>__acc.calls)).join()==='connect',(await win.evaluate(()=>__acc.calls)).join())
+  check('after connecting the card says connected and offers Retry',await visibleText('B 站已连接')&&await visibleText('Reader')&&await win.locator('.bb-reader .bb-r-progress button',{hasText:'重试'}).isVisible())
+  await win.screenshot({path:path.join(OUT,'login-ready.png')})
+  const retryFrom=stub.seen.runs.length
+  stub.script(run(answer('Bilibili fixture','bilibili',BV)))
+  await win.locator('.bb-reader .bb-r-progress button',{hasText:'重试'}).click()
+  await win.waitForFunction(()=>__bb.queue.items.some(it=>it.status==='completed'&&/BV1xx411c7mD/.test(it.url)),null,{timeout:15000});await wait(1200)
+  const second=stub.seen.runs[retryFrom]||{}
+  check('the retry carries the sign-in as a run secret',second.secretEnv?.BLUEBIRD_COOKIE==='SESSDATA=fixture-secret-123; bili_jct=j',JSON.stringify(second.secretEnv||null))
+  check('the model only hears that the variable is set',String(second.message||'').includes('BLUEBIRD_COOKIE is already set')&&!String(second.message||'').includes('fixture-secret'))
+  const logs=await win.evaluate(()=>JSON.stringify(__bb.queue.items))
+  check('the sign-in never lands in the task record',!logs.includes('fixture-secret'))
+  const saved=index().items.find(x=>x.title==='Bilibili fixture')
+  check('the note never contains the sign-in',saved&&!fs.readFileSync(path.join(vault,saved.notePath),'utf8').includes('fixture-secret'))
+  // 账号页:从阅读页 ⋯ 进
+  await win.locator('.bb-reader [data-more]').click();await win.locator('.bb-menu div',{hasText:'平台账号'}).first().click();await wait(600)
+  check('the account page shows who is connected',await visibleText('已连接 · Reader'))
+  await win.locator('.bb-acc [data-acc-off]').click();await wait(500)
+  check('disconnect goes through the host and shows not connected',(await win.evaluate(()=>__acc.calls)).includes('disconnect')&&await visibleText('未连接')&&await win.locator('.bb-acc [data-acc-on]').isVisible())
+  await win.locator('.bb-acc details summary').click();await win.locator('.bb-acc [data-acc-paste]').fill('buvid3=1');await win.locator('.bb-acc [data-acc-save]').click();await wait(400)
+  check('a paste without SESSDATA is explained',await visibleText('没找到登录信息'))
+  await win.locator('.bb-acc [data-acc-paste]').fill('SESSDATA=abc; bili_jct=x');await win.locator('.bb-acc [data-acc-save]').click();await wait(400)
+  check('a good paste connects',await visibleText('已连接')&&await win.locator('.bb-acc [data-acc-paste]').inputValue()==='')
+  await win.screenshot({path:path.join(OUT,'accounts.png')})
+  await win.evaluate(()=>{const r=document.documentElement;r.dataset.mode='dark';r.classList.add('dark')});await wait(400)
+  await win.screenshot({path:path.join(OUT,'accounts-dark.png')})
+  await win.evaluate(()=>{const r=document.documentElement;r.dataset.mode='light';r.classList.remove('dark')})
   })
   }
  } catch(error){check('harness finished',false,String(error?.stack||error))}

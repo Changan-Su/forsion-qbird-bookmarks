@@ -65,7 +65,7 @@ sh install.sh prod    # → ~/.forsion
 
 - **yt-dlp**:技能会用 `run_bash python3 -m pip install -U yt-dlp` 按需装/升级(平台改版失效先升级它)。
 - **ffmpeg**:仅「无字幕 → ASR 兜底」路径需要;只分析有字幕的视频不需要。
-- **语音识别**:无原生字幕时,脚本只交出 16k 单声道 WAV 的路径,转写由插件调 `window.tangu.transcribeAudioFile(path, {timestamps:true})` 走 Forsion 语音链路完成(设置 → 语音)。插件侧**没有** ASR key 这回事。B 站高清/会员可给 `BLUEBIRD_COOKIE`。
+- **语音识别**:无原生字幕时,脚本只交出 16k 单声道 WAV 的路径,转写由插件调 `window.tangu.transcribeAudioFile(path, {timestamps:true})` 走 Forsion 语音链路完成(设置 → 语音)。插件侧**没有** ASR key 这回事。B 站登录:插件用宿主 `ctx.app.platformAccounts`(没有就不显示入口),每次获取前现取 Cookie,放进 `POST /agent/runs` 的 `secret_env.BLUEBIRD_COOKIE`(只在内存、只给这次 run 的 run_bash,输出里打码);提示词只说变量已设好。失败时 `isLoginWall` 认 B 站「要登录」:优先脚本的 `error.blocked`,模型没转述时按报错原文。⚠️别把 Cookie 放进 task 字段、日志、提示词或智库。
 
 ## 验证(两层)
 
