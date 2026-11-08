@@ -581,9 +581,14 @@ async function connectBili() {
   setBiliStatus(st)
   return st
 }
-/** 这次获取要带的登录信息。没连接 / 用户不允许 / 宿主没有 → null,照常不带登录去取。 */
-async function biliCookieFor(it) {
-  if (!accountsApi() || it.importAudio || it.importText || it.plat?.platform !== 'bilibili') return null
+const hostOf = (url) => { try { return new URL(String(url || '')).hostname.toLowerCase() } catch { return '' } }
+/** 真实主机名是 B 站(路径里写着 bilibili.com 的别家网址不算)。 */
+const isBiliHost = (url) => { const h = hostOf(url); return h === 'bilibili.com' || h.endsWith('.bilibili.com') || h === 'b23.tv' }
+/** 登录信息只交给本机引擎:配成外部 / 远程引擎时一律不带(服务端丢弃也挡不住这一次传输)。 */
+const isLocalEngine = (url) => ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostOf(url))
+/** 这次获取要带的登录信息。没连接 / 用户不允许 / 宿主没有 / 不是 B 站主机 / 不是本机引擎 → null,照常不带登录去取。 */
+async function biliCookieFor(it, cfg) {
+  if (!accountsApi() || it.importAudio || it.importText || it.plat?.platform !== 'bilibili' || !isBiliHost(it.url) || !isLocalEngine(cfg?.backendUrl)) return null
   const st = await biliStatus(true)
   if (st?.state !== 'connected') return null
   try { return await accountsApi().cookie('bilibili') } catch { return null }
@@ -1795,7 +1800,7 @@ ${spec}${respondIn()}`
     let out
     const resume = reconnect ? it.runs.at(-1) : null
     // B 站登录信息:现取现用,只进这次 run 的环境变量;模型只被告知「变量已经在了、别打印」。
-    const cookie = !resume && !isPageTask(it) ? await biliCookieFor(it) : null
+    const cookie = !resume && !isPageTask(it) ? await biliCookieFor(it, cfg) : null
     const secretEnv = cookie ? { BLUEBIRD_COOKIE:cookie } : undefined
     it.withAccount = !!cookie
     const cookieNote = cookie ? '\nBLUEBIRD_COOKIE is already set in run_bash\'s environment for this run, and transcribe.py reads it. Never print it, echo it or put it on the command line.' : ''
@@ -3618,7 +3623,7 @@ const offLocaleTop = ctx.subscribeLocale ? ctx.subscribeLocale(() => {
 
 if (globalThis.__BLUEBIRD_TEST__) {
   Object.assign(globalThis.__BLUEBIRD_TEST__, { mutateIndex, pageTask, isPageTask, dropRepeatedTitle, saveEntry, upgradeStorage, qRun, runtimeReady, persistRuntime, taskSnapshot, redact, logEvent, logExport, logText, taskInstructions, qReconnect, streamRun, legacyData, useLegacyFolder, citationSeconds, parseTimeReference, legacyTimeReference, archivedMediaName, entryForNote, timestampEditorExtension, requestTimestamp, playbackTargets, playbackScope, hasSpeech, transcriptPrompt, mediaLevel, maxFileMb, fmtBytes, assetKind, embeddedAssets, mediaGroups })
-  Object.assign(globalThis.__BLUEBIRD_TEST__, { isLoginWall, relDate, bareUrl, needsYou, isRunning, queue, bus, inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
+  Object.assign(globalThis.__BLUEBIRD_TEST__, { isLoginWall, isBiliHost, isLocalEngine, relDate, bareUrl, needsYou, isRunning, queue, bus, inline, renderMarkdown, linkifyTimestamps, safeHref, deriveTitle, sanitizeFileName, today, parsePlatform, isMusic, openNotePath, stripPreamble, mediaSaveDir, assetVaultRel, archivedAssetUrl, getCfg, engineError, runAgent, asrTranscribeFile, saveLink, loadEntry, readIndex, httpLink, bookmarkDetailMarkup, extractUrl, isSupported, parseAgentOutput, fmtTime, parseTs, toSRT, toTXT, toObsidian, onColorOf, readableOn, contrast, folderRoot, stageOf, stageText, countWords, wordState, STEPS, queue, qAdd, qCancel, qRemove, qClearDone, qStageText, qErrText, snapshotStage, restoreStage, ensureWorkFolder, MSG, L, t, badge, platLabel, tplLabel, detailLabel, fmtDate, mirrorLinkMode, MODE_FILE })
 }
 
 return () => { // 插件停用才断分析

@@ -22,6 +22,11 @@ class RetrievalChecks(unittest.TestCase):
             self.assertEqual(headers["Referer"], "https://www.bilibili.com/")
             self.assertEqual(headers["Cookie"], "test-cookie")
             self.assertEqual(module.request_headers("https://www.xiaohongshu.com/explore/test")["Referer"], "https://www.xiaohongshu.com/")
+            self.assertNotIn("Cookie", module.request_headers("https://www.xiaohongshu.com/explore/test"))
+            # 路径里写着 bilibili.com 的别家主机拿不到登录信息
+            self.assertNotIn("Cookie", module.request_headers("https://attacker.example/bilibili.com/video/BV1xx411c7mD"))
+            self.assertNotIn("Cookie", module.scoped_headers({"Cookie": "x", "Referer": "r"}, "https://i0.hdslb.com/a.jpg"))
+            self.assertEqual(module.scoped_headers({"Cookie": "x"}, "https://api.bilibili.com/x")["Cookie"], "x")
 
     def test_initial_state_failure_is_not_an_image_post(self):
         class Downloader:
