@@ -558,7 +558,7 @@ const STORAGE_REQUEST_KEY = `plugin.${PLUGIN_ID}.openStorageAt`
 function openStorage() { pendingOpen = { storage: true }; bus.emit({ type: 'open', storage: true }); ctx.openView('folder') }
 function openAccounts() { pendingOpen = { accounts: true }; bus.emit({ type: 'open', accounts: true }); ctx.openView('folder') }
 
-// ── 平台账号(B 站登录)── 宿主 ctx.app.platformAccounts(2.14.0+,只有桌面端)。没有就不显示任何入口。
+// ── 平台账号(B 站登录)── 宿主 ctx.app.platformAccounts(2.13.8+,只有桌面端)。没有就不显示任何入口。
 // 登录信息不进智库、不进日志、不进提示词:每次获取时现取,经引擎 secret_env 交给 transcribe.py(BLUEBIRD_COOKIE)。
 const accountsApi = () => ctx.app.platformAccounts || null
 const ACCOUNT_EVENT = 'bluebird-account'
