@@ -400,15 +400,15 @@ async function main(){
   const first=stub.seen.runs[from]||{}
   check('without an account the run carries no secret',!first.secretEnv&&!String(first.message||'').includes('BLUEBIRD_COOKIE is already set'),JSON.stringify(first.secretEnv||null))
   check('the failure says Bilibili needs sign-in',await visibleText('B 站要求登录后才能获取这条视频'))
-  check('the failure offers Connect Bilibili',await win.locator('.bb-reader .bb-r-progress button',{hasText:'连接 B 站'}).isVisible())
+  check('the failure offers Connect Bilibili',await win.locator('.bb-reader [data-prog] button',{hasText:'连接 B 站'}).isVisible())
   await win.screenshot({path:path.join(OUT,'login-needed.png')})
-  await win.locator('.bb-reader .bb-r-progress button',{hasText:'连接 B 站'}).click();await wait(800)
+  await win.locator('.bb-reader [data-prog] button',{hasText:'连接 B 站'}).click();await wait(800)
   check('connecting asks the host once',(await win.evaluate(()=>__acc.calls)).join()==='connect',(await win.evaluate(()=>__acc.calls)).join())
-  check('after connecting the card says connected and offers Retry',await visibleText('B 站已连接')&&await visibleText('Reader')&&await win.locator('.bb-reader .bb-r-progress button',{hasText:'重试'}).isVisible())
+  check('after connecting the card says connected and offers Retry',await visibleText('B 站已连接')&&await visibleText('Reader')&&await win.locator('.bb-reader [data-prog] button',{hasText:'重试'}).isVisible())
   await win.screenshot({path:path.join(OUT,'login-ready.png')})
   const retryFrom=stub.seen.runs.length
   stub.script(run(answer('Bilibili fixture','bilibili',BV)))
-  await win.locator('.bb-reader .bb-r-progress button',{hasText:'重试'}).click()
+  await win.locator('.bb-reader [data-prog] button',{hasText:'重试'}).click()
   await win.waitForFunction(()=>__bb.queue.items.some(it=>it.status==='completed'&&/BV1xx411c7mD/.test(it.url)),null,{timeout:15000});await wait(1200)
   const second=stub.seen.runs[retryFrom]||{}
   check('the retry carries the sign-in as a run secret',second.secretEnv?.BLUEBIRD_COOKIE==='SESSDATA=fixture-secret-123; bili_jct=j',JSON.stringify(second.secretEnv||null))

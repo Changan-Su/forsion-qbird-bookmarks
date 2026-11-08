@@ -2061,6 +2061,7 @@ const STYLE = `
 .bb-r-askbox{flex:none}
 .bb-r-empty{margin:auto;text-align:center;max-width:320px;color:var(--bb-text-muted);font-size:12.5px}.bb-r-empty strong{display:block;color:var(--bb-text);font-size:14px;margin-bottom:4px}.bb-r-empty p{margin:0 0 12px}
 .bb-r-progress{background:var(--bb-surf);border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.bb-prog.bb-r-login{background:var(--bb-surf);border:0;border-radius:12px;padding:18px 20px;box-shadow:none}.bb-prog.bb-r-login [data-status]{font-weight:600;color:var(--text)}.bb-prog.bb-r-login .bb-r-login-desc{margin:6px 0 0;line-height:1.55}
 .bb-r-ptitle{font-size:14px;font-weight:600}
 .bb-r-progress .bb-prog{display:block!important;margin:0;padding:0;background:none;border:0;box-shadow:none}
 /* 窄:两列拆平成一列,顺序 = 媒体 → 标签 → 当前标签的内容(原文 / 字幕 / 歌词、笔记、问答)。 */
@@ -2919,7 +2920,9 @@ function mountAnalyze(el, viewCtx) {
     const desc = document.createElement('p'); desc.className = 'bb-muted bb-r-login-desc'
     const actions = document.createElement('div'); actions.className = 'bb-row'; actions.style.marginTop = '12px'
     box.querySelector('.bb-r-login-desc')?.remove()
-    status.after(desc); box.appendChild(actions)
+    // 「要登录」不是坏掉:换成普通卡面(不标红),说明另起一行在标题下面
+    box.classList.remove('err'); box.classList.add('bb-r-login')
+    box.querySelector('.bb-prog-head').after(desc); box.appendChild(actions)
     const button = (label, cls, fn) => { const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = fn; actions.appendChild(b); return b }
     const paint = (st) => {
       if (view !== owner || !box.isConnected) return
