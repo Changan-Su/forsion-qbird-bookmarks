@@ -2,11 +2,11 @@
 
 Bilibili account / B 站账号
 
-- Members-only, HD or rate-limited Bilibili videos can now be fetched with your own account. Connect it by scanning Bilibili's own QR code in a Forsion window. Needs Forsion 2.13.8 or later on desktop; elsewhere nothing changes.
+- Members-only, HD or rate-limited Bilibili videos can now be fetched with your own account. Connect it by scanning Bilibili's own QR code in a Forsion window. Needs Forsion 2.14.0 or later on desktop; elsewhere nothing changes.
 - When Bilibili asks for sign-in, the failure says so and offers Connect Bilibili, then Retry. Pasting a Bilibili link shows a one-line note while no account is connected.
 - Manage it under Platform accounts in the More menu of a Bilibili bookmark, the library actions, or the plugin settings. An advanced paste-cookie fallback is there too.
 - The sign-in stays in Forsion's built-in browser on this computer. It is never written to the vault, notes, logs or prompts; each fetch hands it straight to the download script.
-- B 站会员、高清或被风控的视频，现在可以用你自己的账号获取：在 Forsion 弹出的窗口里扫 B 站自己的二维码即可。需要桌面 2.13.8 及以上；其它端不变。
+- B 站会员、高清或被风控的视频，现在可以用你自己的账号获取：在 Forsion 弹出的窗口里扫 B 站自己的二维码即可。需要桌面 2.14.0 及以上；其它端不变。
 - B 站要求登录时，失败卡会说明原因并给「连接 B 站」，连好后变成「重试」。贴进 B 站链接时，没连接会提示一行。
 - 在 B 站收藏的「更多」菜单、收藏夹操作或插件设置里的「平台账号」管理，也可以高级地粘贴 Cookie。
 - 登录信息只留在这台电脑上 Forsion 的内置浏览器里，不写进智库、笔记、日志或提示词；每次获取时直接交给下载脚本。
