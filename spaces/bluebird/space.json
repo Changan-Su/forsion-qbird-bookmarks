@@ -6,7 +6,7 @@
   },
   "icon": "video",
   "iconFile": "icon.png",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "layout": {
     "main": [
       {
@@ -27,9 +27,7 @@
   },
   "requires": {
     "views": [
-      "plugin:bluebird:folder",
-      "amadeus-editor",
-      "chat-panel"
+      "plugin:bluebird:folder"
     ]
   }
 }

@@ -23,7 +23,7 @@
 
 ```
 你贴链接
-  │  原生 Space:收藏侧栏 | 视频(main.js) | Amadeus 文档 | ChatView
+  │  原生 Space:收藏侧栏 | 青鸟阅读页(main.js:左原内容 / 右笔记 + 问答)
   ▼
 桌面插件 bluebird ──POST /agent/runs (execMode:host, agentSlug:bluebird)──▶ 本机 Tangu 引擎
                                                                               │
@@ -34,16 +34,16 @@
   ◀──SSE token/done(总结正文,AI 由 Tangu 直连 Forsion 完成)──────────────────┘
   │
   ▼  ctx.app.writeFile
-Amadeus 笔记({工作文件夹}/{标题}.md,日期在属性里) ──openNote(reuseKey)──▶ 同屏文档 + ChatView 自动引用
+Amadeus 笔记({工作文件夹}/{标题}.md,来源 / 日期 / 媒体在属性里) ──ctx.ui.mountMarkdownEditor──▶ 阅读页右列(写前重读,对不上不写)
 ```
 
 | 件 | 包内位置 | 干什么 |
 |---|---|---|
-| 插件(manifest + main.js) | 根 | 工作台视频/队列视图:输入链接、播放与任务控制；驱动 Tangu,自身不复制文档或聊天 UI。 |
+| 插件(manifest + main.js) | 根 | 收藏台 + 阅读页:左列按类型放原内容,右列挂宿主编辑器(笔记)和 Chat Box(问答,插件自己的按收藏会话);11-08 起不再用宿主 mainCompanions 分栏(收起的分栏会留成标签,整理中露出上一篇)。 |
 | Tangu 文件夹 Agent `bluebird` | `agents/bluebird/` | 引擎侧智能体,视图靠 `agent_config.agentSlug` 选它;串起转录→总结→问答。`full-auto`(host run_bash 无人值守),run_bash 用途死限在「跑转录脚本 + 装 yt-dlp」。引擎启动/重扫时**播种一次**到 `tangu/agents/`(bundles.ts),已存在永不覆盖。 |
 | 技能 + Python | `agents/bluebird/skills/bluebird-video/` | 转录工作流(host 模式 `run_bash` 跑 `scripts/transcribe.py`)+ 10 套总结模板 + 问答/翻译规则,agent 级随播种就位。 |
 | 技能(链接收藏) | `skills/bluebird-link/` | **bundle 级作用域**:引擎 `bundleSkillRoots()` 原地读 `plugins/<id>/skills/`,不播种、所有 agent 都列得到(优先级 内置 < bundle < 用户)。所以「日常对话里丢个链接就入库」这件事必须放这儿——放 `agents/bluebird/skills/` 只有青鸟 agent 看得见。纯提示词,无脚本。 |
-| Space | `spaces/bluebird/` | 原生 Dockview 配方:统一收藏侧栏 + 视频 + Amadeus + ChatView；desktop spaces:list 汇入,随插件启停显隐。 |
+| Space | `spaces/bluebird/` | 原生 Dockview 配方:统一收藏侧栏 + 青鸟阅读页；desktop spaces:list 汇入,随插件启停显隐。 |
 
 ### 为什么转录用 run_bash 而不是 run_python
 `run_python` 跑在 **Docker 沙箱**里:`--network none`(yt-dlp 下载不了)且看不到技能自带的脚本文件。视频抓取必须在 **host 模式**用 `run_bash` 跑本机 Python —— 所以插件驱动 run 时带 `execMode:'host'`。(依据见 Genesis `tangu-agent/src/services/agentLoop.ts`、`tools/builtin/sandboxPython.ts`。)
