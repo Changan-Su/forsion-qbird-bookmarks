@@ -50,7 +50,7 @@ category: 内容分析
    脚本走你在 shell 里跑的 find=跨家),于是图文帖一直报 `No video formats found`。
    第二行的兜底只在 `$TANGU_HOME` 没设时(TUI / standalone)用,是尽力而为,不是正确性保证。
 2. **确保依赖**:`--diagnose` 显示 yt-dlp 缺失,或平台报错疑似版本过旧时,才跑 `python3 -m pip install -U yt-dlp`,别每次都装。无字幕时要抠音频,还需系统装了 `ffmpeg`,原生字幕路径不需要。
-3. **跑转录**:`python3 "$SCRIPT" "<视频链接>"`。可选凭据用环境变量前缀:B 站高清/会员传 `BLUEBIRD_COOKIE=…`。例:`BLUEBIRD_COOKIE="SESSDATA=…" python3 "$SCRIPT" "https://..."`。
+3. **跑转录**:`python3 "$SCRIPT" "<视频链接>"`。B 站登录信息由应用放进这次 run 的环境变量 `BLUEBIRD_COOKIE`(用户在青鸟里连接了 B 站时才有),脚本自己读。**不要**打印、echo 它,也不要写进命令行;没有就照常不带登录去取。失败时把脚本 `error` 里的 `blocked` 原样带回。
    **素材存档**:调用方给了 `--save-to "<绝对目录>"`、`--media none|audio|video`、`--max-mb N` 就原样带上(路径含空格,引号不能去)。保存媒体可能要几分钟,调用方给了超时就照用。脚本会按档位把音频或完整视频、图文帖的图片落进那个目录,**有字幕时也一样**,并在结果里多回一个 `assets` 数组 = **已落盘的文件名**。超过上限时不保存,`meta.mediaSkipped` 记下体积,不算失败,把 `meta` 原样带回。有 `assets` 就在正文里用 `![[文件名]]` 引用(宿主内嵌渲染:图直接显示、音视频出播放器),**别再写平台外链**——CDN 会过期。没有 `assets`(没给参数 / 存档失败 / 没素材)才退回外链。⚠️`assets` 里没有的文件名一个都不许写进正文:凭空写的 `![[…]]` 在库里是一条死链。
 4. **拿结果**:解析 stdout 的 JSON。
    - `source:"native"` → 有字幕,`segments` 直接可用,照常出总结。

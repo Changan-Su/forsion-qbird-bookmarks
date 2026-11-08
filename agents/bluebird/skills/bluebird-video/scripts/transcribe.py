@@ -152,7 +152,7 @@ def extract_subtitles(info, work_dir, lang_priority, headers=None):
         ext = chosen.get("ext", "vtt")
         sub_path = work_dir / f"subs.{ext}"
         try:
-            req = urllib.request.Request(chosen["url"], headers=headers or {})
+            req = urllib.request.Request(chosen["url"], headers=scoped_headers(headers, chosen["url"]))
             with urllib.request.urlopen(req, timeout=60) as resp:
                 sub_path.write_bytes(resp.read())
             if ext == "json3":
@@ -346,7 +346,7 @@ def download_images(urls, save_dir, stem, headers, meta=None, max_bytes=None):
             hdrs = dict(headers)
             if "xhscdn" in url or "xiaohongshu" in url:
                 hdrs.setdefault("Referer", "https://www.xiaohongshu.com/")
-            req = urllib.request.Request(url, headers=hdrs)
+            req = urllib.request.Request(url, headers=scoped_headers(hdrs, url))
             with urllib.request.urlopen(req, timeout=60) as resp:
                 blob = resp.read(limit + 1)
                 ctype = resp.headers.get("Content-Type", "")
@@ -465,9 +465,23 @@ def request_headers(url):
         headers["Referer"] = "https://www.bilibili.com/"
     elif host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com") or host == "xhslink.com":
         headers["Referer"] = "https://www.xiaohongshu.com/"
-    if os.environ.get("BLUEBIRD_COOKIE", "").strip():
+    # BLUEBIRD_COOKIE 是 B 站的登录信息(应用按 run 放进环境):只发给 B 站自己的主机,按真实主机名判,不看路径
+    if is_bili_host(host) and os.environ.get("BLUEBIRD_COOKIE", "").strip():
         headers["Cookie"] = os.environ["BLUEBIRD_COOKIE"].strip()
     return headers
+
+
+def is_bili_host(host):
+    host = (host or "").lower()
+    return host == "bilibili.com" or host.endswith(".bilibili.com") or host == "b23.tv"
+
+
+def scoped_headers(headers, target_url):
+    """直接 urllib 取字幕 / 图片时:目标不是 B 站主机就去掉 Cookie(CDN 与别的站拿不到登录信息)。"""
+    out = dict(headers or {})
+    if not is_bili_host(urllib.parse.urlparse(target_url).hostname):
+        out.pop("Cookie", None)
+    return out
 
 
 def is_xhs_host(host):
