@@ -104,8 +104,14 @@ const MSG = {
     wcCount: '字数 {n}', wcTarget: ' / 目标 {min}-{max}', wcDetail: ' · 档位:{name}',
     generatedAt: '生成于 {time}',
     noTranscript: '暂无字幕(纯 ASR 或未返回)。', noLyrics: '这首歌没有歌词(纯音乐,或该平台没提供)。', openInBrowser: '在浏览器打开 ↗',
-    nativeDocument: '笔记已在右侧打开', nativeDocumentPending: '整理完成后，笔记和问答会在这里打开',
-    nativeChatHint: 'ChatView 会自动引用这篇笔记，可直接继续追问',
+    rdAsk: '问答', rdAskPlaceholder: '问问这条收藏…', rdMore: '更多', rdExport: '导出…', rdOpenInAmadeus: '在 Amadeus 中打开',
+    rdOpenVideo: '原视频', rdOpenPost: '原帖', rdOpenPage: '打开网页', rdOpenIn: '在{app}打开', rdPlayIn: '在{app}播放',
+    rdPostText: '原文', rdPageText: '网页', rdNoPostText: '这条帖子没有文字。', rdFollow: '跟随播放', rdTranscribing: '转写中…',
+    rdImages: '图文 {n} 张', rdSavedOn: '{date} 收藏', rdOrganizing: '正在整理', rdPrevImage: '上一张', rdNextImage: '下一张',
+    rdRunHint: '整理好后笔记出现在这里。可以先去看别的收藏，左栏会显示进度。',
+    rdLinkOnly: '只收藏了链接，还没整理。', rdNotOrganized: '还没整理', rdNotOrganizedHint: '整理后，笔记会出现在这里。', rdMusicNoDownload: '青鸟不下载音乐，只取歌词和歌曲信息',
+    rdSaving: '保存中…', rdSaved: '已保存', rdConflict: '这篇笔记在别处改过，没有覆盖。', rdReload: '重新载入',
+    rdNoteMissing: '找不到这篇笔记，可能被移动或删除了。', rdReadOnly: '这里只能查看，去 Amadeus 里编辑',
     resummarizeTitle: '重新整理', start: '开始',
     needAnalyzeFirst: '先整理一个视频', noAnswer: '(无回答)',
     nothingToSave: '还没有可保存的笔记', savedToLibrary: '已存入收藏夹', saveFailed: '保存失败:{msg}',
@@ -192,8 +198,14 @@ const MSG = {
     wcCount: '{n} characters', wcTarget: ' / target {min}-{max}', wcDetail: ' · Detail: {name}',
     generatedAt: 'Generated {time}',
     noTranscript: 'No transcript here (audio-only recognition, or none returned).', noLyrics: 'No lyrics for this track (instrumental, or the platform provides none).', openInBrowser: 'Open in browser ↗',
-    nativeDocument: 'The note is open on the right', nativeDocumentPending: 'The note and Q&A open here when organizing finishes',
-    nativeChatHint: 'ChatView automatically references this note, ready for follow-up questions',
+    rdAsk: 'Q&A', rdAskPlaceholder: 'Ask about this bookmark…', rdMore: 'More', rdExport: 'Export…', rdOpenInAmadeus: 'Open in Amadeus',
+    rdOpenVideo: 'Original video', rdOpenPost: 'Original post', rdOpenPage: 'Open page', rdOpenIn: 'Open in {app}', rdPlayIn: 'Play in {app}',
+    rdPostText: 'Post', rdPageText: 'Page', rdNoPostText: 'This post has no text.', rdFollow: 'Follows playback', rdTranscribing: 'Transcribing…',
+    rdImages: '{n} images', rdSavedOn: 'Saved {date}', rdOrganizing: 'Organizing', rdPrevImage: 'Previous image', rdNextImage: 'Next image',
+    rdRunHint: 'The note appears here when it’s ready. You can open other bookmarks meanwhile; the sidebar shows progress.',
+    rdLinkOnly: 'Only the link is saved. It isn’t organized yet.', rdNotOrganized: 'Not organized yet', rdNotOrganizedHint: 'The note appears here once it’s organized.', rdMusicNoDownload: 'Bluebird doesn’t download music, only lyrics and track info',
+    rdSaving: 'Saving…', rdSaved: 'Saved', rdConflict: 'This note changed elsewhere, so nothing was overwritten.', rdReload: 'Reload',
+    rdNoteMissing: 'This note can’t be found. It may have been moved or deleted.', rdReadOnly: 'Read only here. Edit it in Amadeus',
     // 这行渲染进 .bb-label(text-transform:uppercase)、浮层只有 230px:英文整句大写会折行,故只留动词
     resummarizeTitle: 'Organize again', start: 'Start',
     needAnalyzeFirst: 'Organize a video first', noAnswer: '(No answer)',
@@ -1116,7 +1128,6 @@ async function saveEntryInner(full,vault,folder) {
   const base = `${folder}/${sanitizeFileName(noteTitle)}`
   let notePath = `${base}.md`,version=1
   while(await ctx.app.readFile(notePath)!==null)notePath=`${base}-v${++version}.md`
-  const header = t(full.kind === 'link' ? 'linkNoteHeader' : 'noteHeader', { url: full.sourceUrl || (full.meta && full.meta.videoUrl) || '', date: today() })
   const src = full.sourceUrl || (full.meta && full.meta.videoUrl) || ''
   const plat = parsePlatform(src)
   // 已存档的本地素材优先:走宿主的 `#t=` 锚 = 真·就地 seek(不重挂播放器、不联网)。
@@ -1126,19 +1137,17 @@ async function saveEntryInner(full,vault,folder) {
     .exec(full.summaryMarkdown || '') || [])[1] || ''
   // frontmatter:笔记 ↔ 收藏条目的双向可寻址(索引里存 notePath,笔记里存 bluebird_id);
   // 没有它,"这篇笔记是哪条收藏" 只能靠遍历旁挂 json 反查。
-  const fm = ['---', `bluebird_id: ${id}`, `source: ${src}`, `platform: ${(full.meta && full.meta.platform) || plat.platform || ''}`, `date: ${today()}`, '---', ''].join('\n')
+  const fm = ['---', `bluebird_id: ${id}`, `source: ${src}`, `platform: ${(full.meta && full.meta.platform) || plat.platform || ''}`, `date: ${today()}`, ...(localName ? [`media: "[[${assetVaultRel(localName)}]]"`] : []), '---', ''].join('\n')
   // 顶部播放器块:在线源写裸 URL 一行(宿主的书签卡就地渲成播放器),已存档写 wiki 嵌入。
   // 有了它,"点正文时间戳 → 本笔记内的播放器就地跳过去" 这条最舒服的路径天然成立。
   // 正文开头已内嵌这份媒体(无音轨视频的成稿)就不再加一个,否则两个播放器紧挨着。
-  const embeddedAtTop = localName && String(full.summaryMarkdown || '').split(/^## /m)[0].includes(`![[${localName}]]`)
-  const player = full.kind === 'link' || embeddedAtTop ? '' : localName ? `![[${assetVaultRel(localName)}]]\n\n` : (plat.embed && src ? `${src}\n\n` : '')
   const body = linkifyTimestamps(scopedMediaRefs(dropRepeatedTitle(full.summaryMarkdown,noteTitle),folder), plat.watch, localName, ctx.registerEditorExtension ? id : null)
   if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
   const scopedWrite = async (p,text,create=false) => {
     if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
     return ctx.app.writeFileScoped(p,text,vault,{create})
   }
-  while(!await scopedWrite(notePath,fm+header+player+body,true))notePath=`${base}-v${++version}.md`
+  while(!await scopedWrite(notePath,fm+body,true))notePath=`${base}-v${++version}.md`
   if(vault!==taskScope()||folder!==folderRoot())throw Error(t('vaultChanged'))
   const time = full.kind === 'link' ? { savedAt: full.savedAt || new Date().toISOString() } : { generatedAt: full.generatedAt || new Date().toISOString() }
   const m = full.meta || {}
@@ -1220,6 +1229,37 @@ function archivedMediaName(summary) {
   const name = (/!\[\[([^\]|#]+\.(?:mp3|wav|ogg|m4a|flac|mp4|webm|mov|m4v))\]\]/i.exec(summary || '') || [])[1]
   return name && !/[\/\\]/.test(name) ? name : null
 }
+// ── 阅读页按内容类型分(视频 / 图文 / 音乐 / 网页)。左列跟着类型换,右列永远是笔记 / 问答。 ──
+const READER_TAB_KEY = 'bluebird.readerTab'
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp)$/i
+/** 帖子里的图:先认正文里的本地存档件,再认 https 外链,最后才用 meta.images(外链带时效)。 */
+function galleryImages(v, meta = {}) {
+  const out = [], seen = new Set(), add = (u) => { if (u && !seen.has(u)) { seen.add(u); out.push(u) } }
+  const text = String(v.summary || '')
+  for (const m of text.matchAll(/!\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+    const name = m[1].trim(); if (!IMAGE_EXT.test(name) || /-cover\.jpe?g$/i.test(name)) continue
+    add(name.includes('/') ? (ctx.app && typeof ctx.app.assetUrl === 'function' ? ctx.app.assetUrl(name) : '') : archivedAssetUrl(name))
+  }
+  for (const m of text.matchAll(/!\[[^\]]*\]\((https:[^)\s]+)\)/g)) add(safeHref(m[1]))
+  if (!out.length && Array.isArray(meta.images)) for (const u of meta.images) { const h = safeHref(String(u || '')); if (/^https:/i.test(h)) add(h) }
+  return out.filter(Boolean).slice(0, 60)
+}
+function sourceKind(v, meta = {}) {
+  const platform = v.plat && v.plat.platform
+  if (isMusic(platform)) return 'music'
+  if (archivedMediaName(v.summary) || (v.plat && v.plat.embed)) return 'video'
+  if (!Number(meta.duration) && galleryImages(v, meta).length) return 'images'
+  if (v.kind === 'link' || !platform || platform === 'github') return 'page'
+  return 'video'
+}
+/** 帖子正文:脚本给的 description 优先,没有就从笔记的「正文」一节里取。 */
+function postText(v, meta = {}) {
+  if (meta.description) return String(meta.description).trim()
+  const m = /^##\s*(?:正文|Post text|Text|Post)\s*$([\s\S]*?)(?=^##\s|^```json bluebird|(?![\s\S]))/im.exec(String(v.summary || ''))
+  return m ? m[1].replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g, '').trim() : ''
+}
+/** 作者名;平台只给了内部 ID(小红书 24 位十六进制、纯数字 uid)就不显示。 */
+const humanAuthor = (a) => { const s = String(a || '').trim(); return !s || /^[0-9a-f]{16,}$/i.test(s) || /^\d{8,}$/.test(s) ? '' : s }
 const playbackTargets = new Set()
 const playbackScope = () => `${ctx.app.vaultRoot ? ctx.app.vaultRoot() : ''}\n${folderRoot()}`
 function requestTimestamp(ref) {
@@ -1861,6 +1901,67 @@ const STYLE = `
 .bb-native-note strong{display:block;margin-bottom:3px;font-size:12.5px;font-weight:600;color:var(--bb-text)}
 .bb-native-note span{display:block;color:var(--bb-text-muted);font-size:11.5px}
 @media(max-width:520px){.bb-native-actions{width:100%;justify-content:flex-end}.bb-native .bb-media{max-height:42vh}}
+/* 阅读页(11-08 方案 A):左原内容、右笔记 / 问答;窄于 760 改单列。图上的页码和箭头压在固定的黑色半透明底上,所以字恒为白。 */
+.bb-reader{background:var(--bb-bg)}
+.bb-r-hd{flex:none;display:flex;align-items:center;gap:6px;padding:10px 14px 8px 10px}
+.bb-r-titles{flex:1;min-width:0}
+.bb-r-title{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-r-meta{font-size:12px;color:var(--bb-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-r-more{font-size:16px;line-height:1;padding:4px 9px}
+.bb-r-cols{flex:1;min-height:0;display:flex;gap:18px;padding:2px 18px 14px}
+.bb-reader .bb-media:has(> .bb-ph:not(.ov)){background:var(--bb-surf-sub)} /* 没有封面不留一大块黑 */
+.bb-r-left{flex:0 0 42%;min-width:300px;max-width:560px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.bb-r-top{flex:none;display:flex;flex-direction:column;gap:8px}
+.bb-r-lower{flex:1;min-height:0;display:flex;flex-direction:column}
+.bb-r-sec{display:flex;align-items:baseline;gap:8px;margin:6px 2px 4px;font-size:12px;color:var(--bb-text-muted)}.bb-r-sec b{font-size:12.5px;font-weight:600;color:var(--bb-text)}
+.bb-r-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:1px}
+.bb-r-seg{display:flex;gap:10px;padding:5px 8px;border-radius:8px;font-size:12.5px;color:var(--bb-text-sec);cursor:pointer}
+.bb-r-seg span:first-child{flex:none;width:40px;color:var(--bb-text-subtle);font-variant-numeric:tabular-nums}
+.bb-r-seg:hover{background:var(--bb-hover)}.bb-r-seg.static{cursor:default}.bb-r-seg.static:hover{background:none}
+.bb-r-seg.on{background:var(--bb-tint);color:var(--bb-text)}
+.bb-r-text{font-size:12.5px;line-height:1.75;color:var(--bb-text-sec);white-space:pre-wrap;padding:0 2px}
+.bb-r-fine{font-size:11.5px;color:var(--bb-text-subtle)}
+.bb-r-gal{position:relative;height:clamp(220px,46vh,420px);border-radius:12px;overflow:hidden;background:var(--bb-surf-sub);display:flex;justify-content:center}
+.bb-r-gal>img{height:100%;max-width:100%;object-fit:contain;display:block}
+.bb-r-count{position:absolute;right:10px;bottom:10px;font-size:11px;color:rgb(255 255 255 / .95);background:rgba(0,0,0,.45);padding:1px 8px;border-radius:999px}
+.bb-r-arrow{position:absolute;top:50%;width:30px;height:30px;margin-top:-15px;border:0;border-radius:50%;background:rgba(0,0,0,.35);color:rgb(255 255 255 / .95);font-size:18px;line-height:1;cursor:pointer}.bb-r-arrow.l{left:10px}.bb-r-arrow.r{right:10px}
+.bb-r-thumbs{display:flex;gap:6px;overflow-x:auto;padding:2px}
+.bb-r-thumbs button{flex:none;width:42px;height:56px;padding:0;border:0;border-radius:6px;overflow:hidden;opacity:.55;cursor:pointer;background:var(--bb-surf-sub)}
+.bb-r-thumbs button img{width:100%;height:100%;object-fit:cover;display:block}.bb-r-thumbs button.on{opacity:1;box-shadow:0 0 0 2px var(--bb-text)}
+.bb-r-song{display:flex;gap:16px;align-items:center;padding:4px 0}
+.bb-r-cover{width:132px;height:132px;flex:none;border-radius:10px;overflow:hidden;background:var(--bb-surf-sub)}.bb-r-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.bb-r-songinfo{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:6px}.bb-r-songname{font-size:17px;font-weight:600}
+.bb-r-right{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+.bb-r-rhead{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;min-height:30px}
+.bb-r-state{margin-left:auto;font-size:11.5px;color:var(--bb-text-subtle);display:flex;align-items:center;gap:4px}.bb-r-state.warn{color:var(--bb-warn,#b7791f)}
+.bb-reader [role=tablist]{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--overlay-light,var(--bb-surf-sub))}
+.bb-reader [role=tablist] button{height:26px;padding:0 12px;border:0;border-radius:7px;background:none;font:inherit;font-size:12.5px;color:var(--bb-text-muted);cursor:pointer}
+.bb-reader [role=tablist] button.on{background:var(--bb-surf);color:var(--bb-text);font-weight:500}
+.bb-reader .bb-r-srctab{display:none}
+.bb-r-pane{flex:1;min-height:0;display:none;flex-direction:column}
+.bb-reader[data-tab=note] .bb-r-note,.bb-reader[data-tab=ask] .bb-r-ask{display:flex}
+.bb-reader.busy .bb-r-rhead{display:none}.bb-reader.busy .bb-r-note{display:flex}.bb-reader.busy .bb-r-ask{display:none}
+.bb-r-note{overflow:auto;background:var(--bb-surf);border-radius:12px;padding:14px 18px}
+.bb-reader.busy .bb-r-note{background:none;padding:0;overflow:visible}
+.bb-r-readonly{font-size:13.5px}
+.bb-r-bar{display:flex;align-items:center;gap:10px;margin:-4px -6px 12px;padding:8px 8px 8px 12px;border-radius:9px;background:var(--bb-surf-sub);font-size:12.5px;color:var(--bb-text-muted)}.bb-r-bar span{flex:1}
+.bb-r-edhost{flex:1;min-height:0}
+.bb-r-ask{gap:10px}.bb-r-ask .bb-qa-log{flex:1;min-height:0;overflow:auto}
+.bb-r-askbox{flex:none}
+.bb-r-empty{margin:auto;text-align:center;max-width:320px;color:var(--bb-text-muted);font-size:12.5px}.bb-r-empty strong{display:block;color:var(--bb-text);font-size:14px;margin-bottom:4px}.bb-r-empty p{margin:0 0 12px}
+.bb-r-progress{background:var(--bb-surf);border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.bb-r-ptitle{font-size:14px;font-weight:600}
+.bb-r-progress .bb-prog{display:block!important;margin:0;padding:0;background:none;border:0;box-shadow:none}
+/* 窄:两列拆平成一列,顺序 = 媒体 → 标签 → 当前标签的内容(原文 / 字幕 / 歌词、笔记、问答)。 */
+.bb-reader.narrow .bb-r-cols{flex-direction:column;gap:10px;padding:2px 12px 12px}
+.bb-reader.narrow .bb-r-left,.bb-reader.narrow .bb-r-right{display:contents}
+.bb-reader.narrow .bb-r-top{order:1}.bb-reader.narrow .bb-r-rhead{order:2;margin-bottom:0}
+.bb-reader.narrow .bb-r-lower,.bb-reader.narrow .bb-r-pane{order:3}
+.bb-reader.narrow .bb-r-lower{display:none}
+.bb-reader.narrow .bb-r-srctab{display:inline-block}
+.bb-reader.narrow[data-tab=src] .bb-r-lower{display:flex}
+.bb-reader.narrow .bb-r-sec>b{display:none} /* 标签上已经写着字幕 / 歌词 / 原文 */
+.bb-reader.narrow .bb-media{max-height:34vh}
 .bb-tabs{display:flex;gap:4px;padding:4px;border-radius:12px;background:var(--bb-surf-sub);margin-bottom:10px}
 .bb-tab{flex:1;padding:7px;text-align:center;border-radius:9px;cursor:pointer;font-size:12.5px;color:var(--bb-text-sec)}
 .bb-tab.on{background:var(--bb-tint);color:var(--bb-primary);font-weight:500}
@@ -2087,11 +2188,17 @@ function mountAnalyze(el, viewCtx) {
   let homeEmpty = null
   const organizing = new Set()
   const say2 = say
+  // 阅读页挂上的宿主组件(编辑器 / Chat Box / 监听),换页时统一收掉
+  const readerDispose = []
+  const disposeReader = () => { for (const f of readerDispose.splice(0)) { try { f() } catch { /* 已被宿主收掉 */ } } }
+  let readerTab = 'note'
+  let noteFlush = Promise.resolve() // 上一个阅读页收尾时的写盘;新页先等它落完再读文件
+  try { const v = localStorage.getItem(READER_TAB_KEY); if (v === 'ask' || v === 'note') readerTab = v } catch { /* 无痕 / 禁存 */ }
 
   // ── 首页:输入面板 + 分析队列面板(照原版 LinkInputPanel + AnalysisQueueList 同屏) ──
   function renderHome() {
     openGeneration++; seekHandler=null; cur={kind:'home',id:null,live:false}
-    viewCtx?.setCompanionsVisible?.(false)
+    disposeReader()
     const draftKey=taskScope(), draft=runtime.drafts[draftKey] || {}
     const tplOpts=TEMPLATES.map(v=>`<option value="${v}">${tplLabel(v)}</option>`).join('')
     const detOpts=Object.keys(DETAILS).map(k=>`<option value="${k}">${detailLabel(k)}</option>`).join('')
@@ -2262,8 +2369,6 @@ function mountAnalyze(el, viewCtx) {
 
   /** 队列项 → 详情(直播或结果)。 */
   function renderRun(it) {
-    // 这次的笔记落盘前收起文档和 Chat:留着就是上一篇,问答也会引用它。
-    viewCtx?.setCompanionsVisible?.(!!it.notePath)
     const live = ['pending','parsing','transcribing','canceling'].includes(it.status)
     cur = { kind: 'run', id: it.id, live }
     bus.emit({ type: 'nav' })
@@ -2343,7 +2448,7 @@ function mountAnalyze(el, viewCtx) {
 
   /** 存储页:和收藏页同一个主窗格。只动 assets 里的文件,笔记和字幕不碰。 */
   async function renderStorage() {
-    view = null; cur = { kind: 'storage' }
+    view = null; cur = { kind: 'storage' }; disposeReader()
     const scope = assetScope()
     root.innerHTML = `
 <div class="bb-app bb-native">
@@ -2421,63 +2526,376 @@ function mountAnalyze(el, viewCtx) {
     media.appendChild(ph)
   }
 
-  /** 新版 Space 中，插件 pane 只保留媒体和任务控制。文档与问答分别由 Amadeus / ChatView
-   *  原生 pane 承担，因此这里没有第二层滚动容器，也不复制 Markdown/聊天 UI。 */
+  // ── Space 里的阅读页(2026-11-08 方案 A):青鸟占整个主区,左 = 原内容(按类型换),右 = 笔记 / 问答。
+  // 不再借宿主分栏(mainCompanions):收起的分栏会留成标签,整理新收藏时露出上一篇笔记。
+  // 本页挂上的宿主组件(编辑器 / Chat Box / 文件监听)都登记在 readerDispose,换页、卸载时统一收掉。
   function renderNativeDetail(loading, errText) {
+    disposeReader()
+    const generation = openGeneration, current = view
     const meta = (view.data && view.data.meta) || {}
+    const kind = sourceKind(view, meta)
     const title = meta.title || view.title || deriveTitle(view.summary) || (view.kind === 'link' ? t('linkLabel') : t('platVideo'))
-    const metaLine = [view.plat.platform ? platLabel(view.plat.platform) : t('linkLabel'), meta.author, meta.duration ? fmtTime(meta.duration) : ''].filter(Boolean).join(' · ')
-    // 没有可放的媒体(普通网页,或没存档也不能内嵌的收藏):不画播放器。
-    const linkFace = !archivedMediaName(view.summary) && !view.plat.embed && (view.kind === 'link' || !view.plat.platform)
+    const srcLabel = t({ video: 'tabTranscript', music: 'tabLyrics', images: 'rdPostText', page: 'rdPageText' }[kind])
+    const openLabel = kind === 'music' ? t('rdOpenIn', { app: platLabel(view.plat.platform) }) : t({ video: 'rdOpenVideo', images: 'rdOpenPost', page: 'rdOpenPage' }[kind])
+    const href = httpLink(view.sourceUrl) ? safeHref(view.sourceUrl) : ''
+    const hasNote = !!view.notePath && !loading && !errText
+    if (readerTab === 'src') readerTab = 'note'
     root.innerHTML = `
-<div class="bb-app bb-native">
-  <div class="bb-hdr">
-    <button class="bb-btn ghost sm" data-back title="${t('back')}">←</button>
-    <div class="bb-native-title"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-title></div><div class="bb-muted" style="font-size:11px" data-metaline></div></div>
-    <div class="bb-native-actions">
-      ${view.kind === 'link' ? (linkFace ? '' : `<button class="bb-btn ghost sm" data-organize>${t('organizeLink')}</button>`) : `<button class="bb-btn ghost sm" data-restart ${loading ? 'disabled' : ''}>${t('resummarize')}</button>`}
-      <button class="bb-btn ghost sm" data-log>${t('viewLog')}</button><button class="bb-btn ghost sm" data-export ${loading ? 'disabled' : ''}>${t('exportBtn')}</button>
-      <button class="bb-btn primary sm" data-save ${loading ? 'disabled' : ''}>${view.entryId ? t('openNote') : t('saveToLibrary')}</button>
-    </div>
+<div class="bb-app bb-reader" data-tab="${readerTab}">
+  <div class="bb-r-hd">
+    <button class="bb-btn ghost sm bb-r-back" data-back title="${t('back')}" aria-label="${t('back')}">←</button>
+    <div class="bb-r-titles"><div class="bb-r-title" data-title></div><div class="bb-r-meta" data-metaline></div></div>
+    ${href ? `<a class="bb-btn ghost sm" data-source target="_blank" rel="noopener noreferrer"></a>` : ''}
+    <button class="bb-btn ghost sm bb-r-more" data-more title="${t('rdMore')}" aria-label="${t('rdMore')}">⋯</button>
   </div>
-  <div class="bb-body">
-    <div class="bb-prog" data-prog style="display:none">
-      <div class="bb-prog-head"><span data-status></span><span data-pct></span></div>
-      <div class="bb-prog-track"><div class="bb-prog-fill" data-bar></div></div>
-      <div class="bb-steps" data-steps>${STEPS.map((s) => `<span class="bb-step">${t(s[0])}</span>`).join('')}</div>
-    </div>
-    <div class="bb-native-stage">
-      ${linkFace ? `<div class="bb-link-card"><strong data-link-title></strong>${view.kind === 'link' ? `<p>${t('linkContentHint')}</p>` : ''}<div class="bb-row"><a class="bb-btn sm" data-browser target="_blank" rel="noopener noreferrer">${t('openInBrowser')}</a>${view.kind === 'link' ? `<button class="bb-btn primary sm" data-organize>${t('organizeLink')}</button>` : ''}</div></div>` : '<div class="bb-media" data-media></div>'}
-      ${linkFace || view.kind === 'link' ? '' : '<div class="bb-media-strip" data-media-strip></div>'}
-      <div class="bb-native-note">
-        <strong data-native-note></strong>
-        ${view.notePath ? `<span>${t('nativeChatHint')}</span>` : ''}
+  <div class="bb-r-cols">
+    <div class="bb-r-left" data-left></div>
+    <div class="bb-r-right">
+      <div class="bb-r-rhead">
+        <div class="bb-r-seg" role="tablist">
+          <button data-rtab="src" class="bb-r-srctab"></button>
+          <button data-rtab="note">${t('tabSummary')}</button>
+          <button data-rtab="ask">${t('rdAsk')}</button>
+        </div>
+        <span class="bb-r-state" data-state></span>
       </div>
+      <div class="bb-r-pane bb-r-note" data-pane="note"></div>
+      <div class="bb-r-pane bb-r-ask" data-pane="ask"><div class="bb-qa-log" data-qalog></div><div class="bb-r-askbox" data-askbox></div></div>
     </div>
   </div>
 </div>`
     const $ = (s) => root.querySelector(s)
+    const page = $('.bb-reader')
     $('[data-title]').textContent = title
-    $('[data-metaline]').textContent = metaLine
-    $('[data-native-note]').textContent = view.notePath ? t('nativeDocument') : t('nativeDocumentPending')
+    $('[data-metaline]').textContent = readerMetaLine(kind, meta, loading)
+    if (href) { const a = $('[data-source]'); a.href = href; a.textContent = openLabel + ' ↗' }
     $('[data-back]').addEventListener('click', renderHome)
-    const restart = $('[data-restart]'); if (restart) restart.addEventListener('click', (e) => { if (view.sourceUrl) resummarize(e.currentTarget) })
-    $('[data-save]').addEventListener('click', doSave)
-    $('[data-export]').addEventListener('click', (e) => exportMenu(e.currentTarget))
-    $('[data-log]')?.addEventListener('click',()=>showTaskLog(view.runId || view.analysis?.taskId))
-    if (linkFace) { seekHandler = null; $('[data-link-title]').textContent = title; $('[data-browser]').setAttribute('href', safeHref(view.sourceUrl)) }
-    else { renderMedia($('[data-media]'), meta); void renderMediaStrip($('[data-media-strip]'), $('[data-media]'), meta) }
-    $('[data-organize]')?.addEventListener('click', () => renderRun(qAdd(view.sourceUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), view.requirements || '', { replaceEntry: view.entryId })))
-    if (errText) {
-      const box = $('[data-prog]'); box.style.display = ''; box.classList.add('err'); $('[data-status]').textContent = t('failedPrefix', { msg: errText })
-      const actions=document.createElement('div');actions.className='bb-row';actions.style.marginTop='12px'
-      if(httpLink(view.sourceUrl)){const source=document.createElement('a');source.className='bb-btn ghost sm';source.href=view.sourceUrl;source.target='_blank';source.rel='noopener noreferrer';source.textContent=t('openInBrowser');actions.appendChild(source)}
-      const local=document.createElement('button');local.className='bb-btn sm';local.textContent=t('localImport');local.onclick=()=>{renderHome();root.querySelector('[data-import-file]')?.click()};actions.appendChild(local)
-      const task=qFind(view.runId || view.analysis?.taskId)
-      if(task?.status==='interrupted'){const reconnect=document.createElement('button');reconnect.className='bb-btn sm';reconnect.textContent=t('reconnect');reconnect.onclick=()=>qReconnect(task.id);actions.appendChild(reconnect)}
-      box.appendChild(actions)
+    $('[data-more]').addEventListener('click', (e) => readerMenu(e.currentTarget, loading))
+    $('.bb-r-srctab').textContent = srcLabel
+    renderReaderLeft($('[data-left]'), kind, meta, loading)
+    // 窄了(主区不到 760)改单列:顶部留媒体,下面三个标签,第一个是原文 / 字幕 / 歌词。
+    if (typeof ResizeObserver === 'function') {
+      const ro = new ResizeObserver(() => {
+        const narrow = page.clientWidth > 0 && page.clientWidth < 760
+        page.classList.toggle('narrow', narrow)
+        if (!narrow && page.dataset.tab === 'src') setTab('note')
+      })
+      ro.observe(page); readerDispose.push(() => ro.disconnect())
     }
-    if (view.notePath && !view.playbackOnly) openNotePath(view.notePath, false)
+    const setTab = (tab) => {
+      page.dataset.tab = tab
+      if (tab !== 'src') { readerTab = tab; try { localStorage.setItem(READER_TAB_KEY, tab) } catch { /* 无痕 / 禁存 */ } }
+      root.querySelectorAll('[data-rtab]').forEach((b) => b.classList.toggle('on', b.dataset.rtab === tab))
+      if (tab === 'ask') askFocus?.()
+    }
+    let askFocus = null
+    root.querySelectorAll('[data-rtab]').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.rtab)))
+    setTab(readerTab)
+    const notePane = $('[data-pane="note"]')
+    if (loading || errText) {
+      // 整理中 / 失败:右边整块是进度或原因,不挂任何笔记和问答(上一篇不会露出来)。
+      page.classList.add('busy')
+      notePane.innerHTML = readerProgressMarkup(loading)
+      if (loading) {
+        $('[data-cancel]')?.addEventListener('click', () => { const id = view.runId; if (id) void qCancel(id) })
+      } else readerErrorActions(notePane, errText)
+      notePane.querySelector('[data-log]')?.addEventListener('click', () => showTaskLog(view.runId || view.analysis?.taskId))
+      return
+    }
+    if (!hasNote) {
+      if (view.kind === 'link') {
+        notePane.innerHTML = `<div class="bb-r-empty"><strong>${t('rdNotOrganized')}</strong><p>${t('rdNotOrganizedHint')}</p><button class="bb-btn primary sm" data-organize>${t('organizeLink')}</button></div>`
+        $('[data-organize]').addEventListener('click', () => renderRun(qAdd(view.sourceUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), view.requirements || '', { replaceEntry: view.entryId })))
+      } else {
+        // 整理完了却没落盘(保存失败等):先只读显示结果,⋯ 里能「存为笔记」。
+        const box = document.createElement('div'); box.className = 'bb-out bb-r-readonly'; notePane.appendChild(box)
+        renderMarkdown(box, view.summary || t('noSummary'), (sec) => seekHandler && seekHandler(sec))
+      }
+    } else {
+      // 只收藏的链接也有一篇只写着链接的笔记:照常可改,上面一条提示还能整理。
+      if (view.kind === 'link') {
+        const bar = document.createElement('div'); bar.className = 'bb-r-bar'
+        const tx = document.createElement('span'); tx.textContent = t('rdLinkOnly')
+        const go = document.createElement('button'); go.className = 'bb-btn primary sm'; go.setAttribute('data-organize', ''); go.textContent = t('organizeLink')
+        go.addEventListener('click', () => renderRun(qAdd(view.sourceUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), view.requirements || '', { replaceEntry: view.entryId })))
+        bar.append(tx, go); notePane.appendChild(bar)
+      }
+      const edHost = document.createElement('div'); edHost.className = 'bb-r-edhost'; notePane.appendChild(edHost)
+      void mountReaderNote(edHost, $('[data-state]'), view.notePath, generation, current)
+    }
+    askFocus = wireReaderAsk($('[data-qalog]'), $('[data-askbox]'), current)
+  }
+
+  function readerMetaLine(kind, meta, loading) {
+    const when = view.savedAt || view.generatedAt
+    const date = when ? new Date(when).toLocaleDateString(dateLoc(), { month: 'numeric', day: 'numeric' }) : ''
+    const images = kind === 'images' ? galleryImages(view, meta).length : 0
+    const source = view.plat.platform ? platLabel(view.plat.platform) : (httpLink(view.sourceUrl)?.hostname || t('linkLabel')).replace(/^www\./, '')
+    return [source, humanAuthor(meta.author), kind === 'music' && meta.album ? `《${meta.album}》` : '',
+      images ? t('rdImages', { n: images }) : meta.duration ? fmtTime(meta.duration) : '',
+      loading ? t('rdOrganizing') : date ? t('rdSavedOn', { date }) : ''].filter(Boolean).join(' · ')
+  }
+
+  function readerMenu(anchor, loading) {
+    closeMenus()
+    const box = document.createElement('div'); box.className = 'bb-menu'
+    const r = anchor.getBoundingClientRect(); box.style.left = Math.max(8, r.right - 220) + 'px'; box.style.top = (r.bottom + 4) + 'px'; box.style.minWidth = '200px'
+    const add = (label, fn) => { const d = document.createElement('div'); d.textContent = label; d.addEventListener('click', () => { closeMenus(); fn() }); box.appendChild(d) }
+    if (!loading && view.sourceUrl) {
+      if (view.kind === 'link') add(t('organizeLink'), () => renderRun(qAdd(view.sourceUrl, getSetting('defaultTemplate', '通用'), getSetting('detail', 'standard'), view.requirements || '', { replaceEntry: view.entryId })))
+      else add(t('resummarize'), () => resummarize(anchor))
+    }
+    if (view.runId || view.analysis?.taskId) add(t('viewLog'), () => showTaskLog(view.runId || view.analysis?.taskId))
+    if (!loading) add(t('rdExport'), () => exportMenu(anchor))
+    if (view.notePath) add(t('rdOpenInAmadeus'), () => openNotePath(view.notePath))
+    else if (!loading && view.summary) add(t('saveToLibrary'), () => void doSave())
+    showMenu(box)
+  }
+
+  function renderReaderLeft(host, kind, meta, loading) {
+    const top = document.createElement('div'); top.className = 'bb-r-top'
+    const lower = document.createElement('div'); lower.className = 'bb-r-lower'
+    const head = document.createElement('div'); head.className = 'bb-r-sec'
+    const list = document.createElement('div'); list.className = 'bb-r-list'
+    host.replaceChildren(top, lower); lower.append(head, list)
+    const secTitle = (name, hint) => { const b = document.createElement('b'); b.textContent = name; head.replaceChildren(b); if (hint) { const s = document.createElement('span'); s.textContent = hint; head.appendChild(s) } }
+    if (kind === 'music') {
+      const card = document.createElement('div'); card.className = 'bb-r-song'
+      const cover = document.createElement('div'); cover.className = 'bb-r-cover'
+      const art = safeHref(meta.thumbnail || '')
+      if (/^https:/i.test(art)) { const img = document.createElement('img'); img.src = art; img.alt = ''; img.addEventListener('error', () => img.remove()); cover.appendChild(img) }
+      const info = document.createElement('div'); info.className = 'bb-r-songinfo'
+      const name = document.createElement('div'); name.className = 'bb-r-songname'; name.textContent = meta.title || view.title || ''
+      const by = document.createElement('div'); by.className = 'bb-muted'; by.textContent = [humanAuthor(meta.author), meta.album ? `《${meta.album}》` : '', meta.duration ? fmtTime(meta.duration) : ''].filter(Boolean).join(' · ')
+      info.append(name, by)
+      if (httpLink(view.sourceUrl)) { const a = document.createElement('a'); a.className = 'bb-btn sm'; a.href = safeHref(view.sourceUrl); a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = t('rdPlayIn', { app: platLabel(view.plat.platform) }); info.appendChild(a) }
+      const note = document.createElement('div'); note.className = 'bb-r-fine'; note.textContent = t('rdMusicNoDownload'); info.appendChild(note)
+      card.append(cover, info); top.appendChild(card)
+      seekHandler = null
+      secTitle(t('tabLyrics'))
+      fillSegments(list, null, loading)
+      return
+    }
+    if (kind === 'images') {
+      const urls = galleryImages(view, meta)
+      const gal = document.createElement('div'); gal.className = 'bb-r-gal'
+      const img = document.createElement('img'); img.alt = ''
+      const count = document.createElement('span'); count.className = 'bb-r-count'
+      const thumbs = document.createElement('div'); thumbs.className = 'bb-r-thumbs'
+      let at = 0
+      const show = (i) => {
+        at = (i + urls.length) % urls.length; img.src = urls[at]; count.textContent = `${at + 1} / ${urls.length}`
+        thumbs.querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === at))
+      }
+      const arrow = (dir, label) => { const b = document.createElement('button'); b.className = 'bb-r-arrow ' + (dir < 0 ? 'l' : 'r'); b.textContent = dir < 0 ? '‹' : '›'; b.setAttribute('aria-label', label); b.addEventListener('click', () => show(at + dir)); return b }
+      gal.append(img, count)
+      if (urls.length > 1) gal.append(arrow(-1, t('rdPrevImage')), arrow(1, t('rdNextImage')))
+      urls.forEach((u, k) => { const b = document.createElement('button'); const im = document.createElement('img'); im.src = u; im.alt = ''; im.addEventListener('error', () => { b.style.display = 'none' }); b.appendChild(im); b.addEventListener('click', () => show(k)); thumbs.appendChild(b) })
+      img.addEventListener('error', () => { img.style.visibility = 'hidden' }); img.addEventListener('load', () => { img.style.visibility = '' })
+      top.appendChild(gal); if (urls.length > 1) top.appendChild(thumbs)
+      if (urls.length) show(0)
+      seekHandler = null
+      secTitle(t('rdPostText'))
+      const text = postText(view, meta)
+      const body = document.createElement('div'); body.className = 'bb-r-text'
+      if (text) body.textContent = text; else { body.classList.add('bb-muted'); body.textContent = t('rdNoPostText') }
+      list.appendChild(body)
+      return
+    }
+    if (kind === 'page') {
+      const card = document.createElement('div'); card.className = 'bb-link-card'
+      const site = document.createElement('div'); site.className = 'bb-r-fine'; site.textContent = (httpLink(view.sourceUrl)?.hostname || '').replace(/^www\./, '')
+      const strong = document.createElement('strong'); strong.textContent = meta.title || view.title || bareUrl(view.sourceUrl)
+      card.append(site, strong)
+      if (meta.description) { const p = document.createElement('p'); p.textContent = String(meta.description).slice(0, 280); card.appendChild(p) }
+      top.appendChild(card)
+      seekHandler = null
+      lower.remove()
+      return
+    }
+    // 视频(含本地音视频):播放器 + 本地文件那一行 + 字幕。
+    const media = document.createElement('div'); media.className = 'bb-media'
+    const strip = document.createElement('div'); strip.className = 'bb-media-strip'
+    top.append(media, strip)
+    renderMedia(media, meta)
+    void renderMediaStrip(strip, media, meta)
+    secTitle(t('tabTranscript'), t('rdFollow'))
+    fillSegments(list, media, loading)
+  }
+
+  /** 字幕 / 歌词:点一行跳过去;本地播放器播放时跟着高亮当前那行。 */
+  function fillSegments(list, media, loading) {
+    list.replaceChildren()
+    const segs = (view.data && Array.isArray(view.data.segments)) ? view.data.segments : []
+    if (!segs.length) {
+      const em = document.createElement('div'); em.className = 'bb-r-fine'
+      em.textContent = loading ? t('rdTranscribing') : t(isMusic(view.plat.platform) ? 'noLyrics' : 'noTranscript')
+      list.appendChild(em); return
+    }
+    const rows = segs.slice(0, 2000).map((s) => {
+      const row = document.createElement('div'); row.className = 'bb-r-seg'
+      const ts = document.createElement('span'); ts.textContent = fmtTime(s.start || 0)
+      const tx = document.createElement('span'); tx.textContent = s.text || ''
+      row.append(ts, tx)
+      if (media) row.addEventListener('click', () => seekHandler && seekHandler(s.start || 0))
+      else row.classList.add('static')
+      list.appendChild(row)
+      return row
+    })
+    const player = media && media.querySelector('video,audio')
+    if (!player) return
+    let on = -1
+    const follow = () => {
+      const now = player.currentTime || 0
+      let i = -1
+      for (let k = 0; k < segs.length && k < rows.length; k++) { if ((segs[k].start || 0) <= now + 0.05) i = k; else break }
+      if (i === on) return
+      if (on >= 0) rows[on]?.classList.remove('on')
+      on = i
+      if (i >= 0) { rows[i].classList.add('on'); rows[i].scrollIntoView({ block: 'nearest' }) }
+    }
+    player.addEventListener('timeupdate', follow)
+  }
+
+  function readerProgressMarkup(loading) {
+    if (!loading) return `<div class="bb-prog err" data-prog><div class="bb-prog-head"><span data-status></span></div></div>`
+    return `<div class="bb-r-progress">
+  <div class="bb-r-ptitle">${t('rdOrganizing')}</div>
+  <div class="bb-prog" data-prog>
+    <div class="bb-prog-head"><span data-status></span><span data-pct></span></div>
+    <div class="bb-prog-track"><div class="bb-prog-fill" data-bar></div></div>
+    <div class="bb-steps" data-steps>${STEPS.map((s) => `<span class="bb-step">${t(s[0])}</span>`).join('')}</div>
+  </div>
+  <p class="bb-r-fine">${t('rdRunHint')}</p>
+  <div class="bb-row"><button class="bb-btn sm" data-cancel>${t('cancel')}</button><button class="bb-btn ghost sm" data-log>${t('viewLog')}</button></div>
+</div>`
+  }
+
+  function readerErrorActions(pane, errText) {
+    const box = pane.querySelector('[data-prog]')
+    box.querySelector('[data-status]').textContent = t('failedPrefix', { msg: errText })
+    const actions = document.createElement('div'); actions.className = 'bb-row'; actions.style.marginTop = '12px'
+    if (httpLink(view.sourceUrl)) { const source = document.createElement('a'); source.className = 'bb-btn ghost sm'; source.href = safeHref(view.sourceUrl); source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = t('openInBrowser'); actions.appendChild(source) }
+    const local = document.createElement('button'); local.className = 'bb-btn sm'; local.textContent = t('localImport'); local.onclick = () => { renderHome(); root.querySelector('[data-import-file]')?.click() }; actions.appendChild(local)
+    const log = document.createElement('button'); log.className = 'bb-btn ghost sm'; log.textContent = t('viewLog'); log.setAttribute('data-log', ''); actions.appendChild(log)
+    const task = qFind(view.runId || view.analysis?.taskId)
+    if (task?.status === 'interrupted') { const reconnect = document.createElement('button'); reconnect.className = 'bb-btn sm'; reconnect.textContent = t('reconnect'); reconnect.onclick = () => qReconnect(task.id); actions.appendChild(reconnect) }
+    box.appendChild(actions)
+  }
+
+  /** 笔记:宿主编辑器直接改插件写的那篇 .md。
+   *  写盘纪律:只在用户真的动过之后写;写前重读,和上次读到 / 写下的不一致(别处改过、读不到)就不写,
+   *  提示重新载入 —— 读不到 ≠ 空,绝不拿编辑器里的内容盖掉别人的改动。frontmatter 原样留着,只换正文。 */
+  async function mountReaderNote(host, stateEl, path, generation, owner) {
+    const vault = taskScope()
+    await noteFlush.catch(() => {})
+    const raw = await ctx.app.readFile(path).catch(() => null)
+    if (disposed || generation !== openGeneration || view !== owner || !host.isConnected) return
+    if (raw == null) { host.innerHTML = `<div class="bb-r-empty"><p>${t('rdNoteMissing')}</p></div>`; return }
+    const fmOf = (text) => (/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text) || [''])[0]
+    let base = raw, fm = fmOf(raw), pending = null, timer = null, conflict = false, touched = false, flushing = false, settled = null, chain = Promise.resolve()
+    const setState = (state, msg) => {
+      stateEl.replaceChildren()
+      if (state === 'conflict') {
+        const s = document.createElement('span'); s.textContent = t('rdConflict')
+        const b = document.createElement('button'); b.className = 'bb-btn ghost sm'; b.textContent = t('rdReload'); b.addEventListener('click', () => void reload(true))
+        stateEl.append(s, b); stateEl.className = 'bb-r-state warn'; return
+      }
+      stateEl.className = 'bb-r-state' + (state === 'error' ? ' warn' : '')
+      stateEl.textContent = state === 'saving' ? t('rdSaving') : state === 'saved' ? t('rdSaved') : state === 'error' ? t('saveFailed', { msg }) : ''
+    }
+    const editable = typeof ctx.ui?.mountMarkdownEditor === 'function' && (typeof ctx.app.writeFileScoped === 'function' || typeof ctx.app.writeFile === 'function')
+    if (!editable) {
+      // 旧宿主:只读,改去 Amadeus。
+      const box = document.createElement('div'); box.className = 'bb-out bb-r-readonly'; host.appendChild(box)
+      if (typeof ctx.ui?.mountMarkdown === 'function') { const h = ctx.ui.mountMarkdown(box, { markdown: raw.slice(fm.length) }); readerDispose.push(() => h.dispose()) }
+      else renderMarkdown(box, raw.slice(fm.length), (sec) => seekHandler && seekHandler(sec))
+      stateEl.textContent = t('rdReadOnly'); return
+    }
+    const doFlush = async () => {
+      clearTimeout(timer); timer = null
+      if (pending == null || conflict) return
+      const body = pending; pending = null; flushing = true
+      try {
+        const now = await ctx.app.readFile(path).catch(() => null)
+        if (conflict || now == null || now !== base) { conflict = true; setState('conflict'); return }
+        const next = fm + body
+        if (next === now) { setState('saved'); return }
+        if (vault !== taskScope()) throw Error(t('vaultChanged'))
+        const ok = ctx.app.writeFileScoped ? await ctx.app.writeFileScoped(path, next, vault, {}) : (await ctx.app.writeFile(path, next), true)
+        if (ok === false) throw Error(t('vaultChanged'))
+        base = next; if (!conflict) setState(pending == null ? 'saved' : 'saving')
+      } catch (e) { if (pending == null) pending = body; setState('error', (e && e.message) || e) } finally { flushing = false }
+    }
+    const flush = () => (chain = chain.then(doFlush, doFlush))
+    const body0 = raw.slice(fm.length)
+    const handle = ctx.ui.mountMarkdownEditor(host, {
+      value: body0, modes: false, vault: true, label: t('tabSummary'),
+      onChange(md) {
+        // 编辑器挂上时可能把 Markdown 规整一遍并回调:用户碰之前的回调只记成基线,不写盘,免得一打开就重写笔记。
+        // 碰过之后(键盘、粘贴、拖放、指针都算,勾任务框这类纯鼠标改动也在内)和基线不同才算改动。
+        if (!touched) { settled = md; return }
+        if (conflict || md === (settled ?? body0)) return
+        pending = md; setState('saving'); clearTimeout(timer); timer = setTimeout(flush, 800)
+      },
+    })
+    const touch = () => { touched = true }
+    const TOUCH = ['beforeinput', 'keydown', 'paste', 'drop', 'cut', 'pointerdown']
+    for (const ev of TOUCH) host.addEventListener(ev, touch, true)
+    async function reload(force) {
+      const text = await ctx.app.readFile(path).catch(() => null)
+      if (text == null || !host.isConnected) return
+      if (!force && (text === base || pending != null || flushing)) { if (text !== base) { conflict = true; setState('conflict') } return }
+      clearTimeout(timer); timer = null; pending = null; conflict = false; touched = false; settled = null
+      base = text; fm = fmOf(text); handle.update({ value: text.slice(fm.length) }); setState('')
+    }
+    // watchFile 只报配置类文本,.md 的外部改动要靠库事件;两个都订,reload 自己比内容去重。
+    const offWatch = ctx.app.watchFile ? ctx.app.watchFile(path, () => void reload(false)) : null
+    const offVault = ctx.app.onVaultEvent ? ctx.app.onVaultEvent((events) => { if (events.some((e) => e.path === path || e.kind === 'vault' || (e.kind === 'rename' && e.from === path))) void reload(false) }) : null
+    readerDispose.push(() => {
+      for (const ev of TOUCH) host.removeEventListener(ev, touch, true)
+      offWatch?.(); offVault?.()
+      if (pending != null) void flush()
+      noteFlush = chain.catch(() => {})
+      void chain.then(() => handle.dispose(), () => handle.dispose())
+    })
+  }
+
+  /** 问答:只问这一条。宿主 Chat Box 做输入框(没有就退回普通输入框),回答画在上面;会话按收藏分开。 */
+  function wireReaderAsk(log, boxHost, owner) {
+    const send = async (q) => {
+      q = String(q || '').trim(); if (!q) return false
+      if (!owner.sessionId) { say2(t('needAnalyzeFirst'), { level: 'warning' }); return false }
+      const cfg = await getCfg(), unavailable = engineError(cfg)
+      if (unavailable) { say2(t(unavailable), { level: 'error' }); return false }
+      const u = document.createElement('div'); u.className = 'bb-msg u'; u.textContent = q; log.appendChild(u)
+      const a = document.createElement('div'); a.className = 'bb-msg a'; a.textContent = '…'; log.appendChild(a); log.scrollTop = log.scrollHeight
+      if (qaController) qaController.abort(); qaController = new AbortController(); const sig = qaController.signal
+      try {
+        let context = owner.qaContext || ''
+        if (owner.qaPrimed === false) {
+          // 第一次提问才把这条收藏交给会话:当前笔记文件(含右列刚改的),读不到再用当初的总结。
+          await noteFlush.catch(() => {})
+          const file = owner.notePath ? await ctx.app.readFile(owner.notePath).catch(() => null) : null
+          const note = file != null ? file.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '') : owner.summary || ''
+          context = [note ? `Saved note (reference data):\n${note.slice(0, 12000)}` : '', owner.qaSegs || ''].filter(Boolean).join('\n\n')
+        }
+        const ans = await runAgent(cfg, owner.sessionId, (context ? context + '\n\nUser question:\n' : '') + q + respondIn(), (full) => { a.textContent = full; log.scrollTop = log.scrollHeight }, sig)
+        owner.qaContext = ''; owner.qaPrimed = true
+        renderMarkdown(a, ans || t('noAnswer'), (sec) => seekHandler && seekHandler(sec))
+      } catch (e) { if (!sig.aborted) a.textContent = t('failedPrefix', { msg: (e && e.message) || e }) }
+      return true
+    }
+    if (typeof ctx.ui?.mountChatBox === 'function') {
+      const box = ctx.ui.mountChatBox(boxHost, { placeholder: t('rdAskPlaceholder'), label: t('rdAsk'), submitLabel: t('qaSend'), modelPicker: false, submitOn: 'enter', onSubmit: (d) => send(d.text) })
+      readerDispose.push(() => box.dispose())
+      return () => box.focus()
+    }
+    boxHost.innerHTML = `<div class="bb-row"><input class="bb-input" data-qin placeholder="${t('rdAskPlaceholder')}" style="flex:1;padding:7px 10px"/><button class="bb-btn primary sm" data-ask>${t('qaSend')}</button></div>`
+    const inp = boxHost.querySelector('[data-qin]'), btn = boxHost.querySelector('[data-ask]')
+    const go = async () => { const q = inp.value; btn.disabled = true; try { if (await send(q)) inp.value = '' } finally { btn.disabled = false } }
+    btn.addEventListener('click', go); inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); void go() } })
+    return () => inp.focus()
   }
 
   // ── 详情(直播 / 结果 / 收藏共用一张脸) ──
@@ -2658,8 +3076,7 @@ function mountAnalyze(el, viewCtx) {
     if (view.runId) { const it = qFind(view.runId); if (it) { it.entryId = r.id; it.notePath = r.notePath;it.status='completed';it.errKey='';it.saveError='';it.endedAt=Date.now();qEmit() } }
     bus.emit({ type: 'saved' })
     const b = root.querySelector('[data-save]'); if (b) b.textContent = t('openNote')
-    const noteState = root.querySelector('[data-native-note]'); if (noteState) noteState.textContent = t('nativeDocument')
-    if (nativeWorkbench) { viewCtx?.setCompanionsVisible?.(true); openNotePath(r.notePath, false) }
+    if (nativeWorkbench && cur.kind !== 'home') renderDetail(false) // 阅读页右列从只读换成可编辑的笔记
   }
   async function doSave() {
     if (view.entryId && view.notePath) { openNotePath(view.notePath); return } // 已保存 → 在 Amadeus 里打开笔记
@@ -2695,7 +3112,6 @@ function mountAnalyze(el, viewCtx) {
     if (options.playbackOnly && mediaScope === requestedScope && cur.kind === 'entry' && cur.id === id && seekHandler) { seekHandler(options.at); return }
     const full = await loadEntry(id)
     if (disposed || generation !== openGeneration || requestedScope !== playbackScope()) return
-    viewCtx?.setCompanionsVisible?.(true)
     mediaScope = requestedScope
     if (!full) { say2(t('entryMissing'), { level: 'error' }); renderHome(); return }
     const sourceUrl = full.sourceUrl || (full.meta && full.meta.videoUrl) || ''
@@ -2711,8 +3127,12 @@ function mountAnalyze(el, viewCtx) {
     renderDetail(false)
     if (options.playbackOnly) { if (seekHandler) seekHandler(options.at); return }
     // Navigation is read-only. Send saved context only with the user's first explicit question.
-    view.qaContext = view.kind !== 'link' && view.data.segments.length
-      ? `Saved video transcript (reference data):\n${view.data.segments.slice(0, 400).map((segment) => `[${fmtTime(segment.start)}] ${segment.text}`).join('\n')}` : ''
+    // 图文、网页、音乐常常没有字幕:笔记本身也给上,问答才知道问的是哪一条。
+    // 问答的参考资料在第一次提问时现取(笔记可能刚在右列改过),这里只记下字幕。
+    view.qaSegs = view.kind !== 'link' && view.data.segments.length
+      ? `Saved transcript or lyrics (reference data):\n${view.data.segments.slice(0, 400).map((segment) => `[${fmtTime(segment.start)}] ${segment.text}`).join('\n')}` : ''
+    view.qaPrimed = false
+    if (!nativeWorkbench) view.qaContext = view.qaSegs // 兼容版一体式详情照旧只带字幕
   }
 
   // ── 总线消费:library 打开请求 / 队列变更 / 直播 token ──
@@ -2770,7 +3190,7 @@ function mountAnalyze(el, viewCtx) {
   ensureWorkFolder() // folder 视图可单独打开(状态栏/命令),不能只靠 library 建夹
   if (pendingOpen) { const p = pendingOpen; pendingOpen = null; consume(p) } else renderHome()
 
-  return () => { disposed = true; openGeneration++; playbackTargets.delete(playbackTarget); bus.emit({ type: 'nav' }); homeEmpty?.dispose?.(); off(); offBus(); if (offLocale) offLocale(); clearInterval(tick); if (qaController) qaController.abort() } // 队列不随视图死:分析继续、自动落盘
+  return () => { disposed = true; openGeneration++; disposeReader(); playbackTargets.delete(playbackTarget); bus.emit({ type: 'nav' }); homeEmpty?.dispose?.(); off(); offBus(); if (offLocale) offLocale(); clearInterval(tick); if (qaController) qaController.abort() } // 队列不随视图死:分析继续、自动落盘
 }
 
 let pendingLogId = null
@@ -2814,7 +3234,7 @@ ctx.registerSettingsView?.({ id: 'media', mount: mountMediaSettings })
 // 设置在独立窗口里,那边的插件实例够不到主窗的视图;同源窗口之间只有 storage 事件是通的。
 const onStorageRequest = (e) => { if (e.key === STORAGE_REQUEST_KEY && e.newValue) openStorage() }
 globalThis.window?.addEventListener?.('storage', onStorageRequest)
-ctx.registerView({ id: 'folder', title: t('viewFolder'), mount: mountAnalyze, singleton: true, workspaceSource: 'library-list', mainCompanions:[{type:'amadeus-editor',key:'bluebird-document',split:'right'},{type:'chat-panel',key:'bluebird-chat',split:'down',params:{autoRefFromMain:true}}] })
+ctx.registerView({ id: 'folder', title: t('viewFolder'), mount: mountAnalyze, singleton: true, workspaceSource: 'library-list' })
 ctx.registerView({id:'analysis-log',title:t('logTitle'),icon:'list-tree',mount:mountLog,singleton:true})
 // 统一左栏列表源(宿主 2026-08-25+ 才有;老宿主可选调用即静默跳过):收藏条目的**平面投影**——
 // 完整体验(搜索/文件夹管理/卡片/新建)仍在 library 视图,这里只供统一工作区联动列条目、一键打开。

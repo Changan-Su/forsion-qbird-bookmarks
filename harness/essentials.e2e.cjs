@@ -45,7 +45,7 @@ async function main(){
   const visibleText=needle=>win.evaluate(n=>{const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);while(w.nextNode()){const e=w.currentNode.parentElement;if(w.currentNode.textContent.includes(n)&&e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'){const r=e.getBoundingClientRect();if(r.width>0&&r.height>0&&document.elementFromPoint(r.left+Math.min(r.width/2,20),r.top+r.height/2)?.closest('body'))return true}}return false},needle)
   const composerVisible=()=>win.evaluate(()=>[...document.querySelectorAll('textarea,[contenteditable="true"]')].some(e=>!e.closest('.bb-root')&&e.closest('.wb-view')&&e.getClientRects().length>0&&/消息|message/i.test(e.getAttribute('placeholder')||e.getAttribute('aria-placeholder')||e.textContent||'')))
   const openRow=async id=>{await win.evaluate(i=>__bb.open(i),id);await wait(1500)}
-  const back=async()=>{await win.locator('.bb-native [data-back]').click();await win.waitForSelector('[data-url]');await wait(700)}
+  const back=async()=>{await win.locator('.bb-reader [data-back]').click();await win.waitForSelector('[data-url]');await wait(700)}
   const foldAll=async state=>{const rows=win.locator(`.t2s-folder-row[aria-expanded="${state}"]`);while(await rows.count()){await rows.first().click();await wait(200)}}
   const expandAll=()=>foldAll('false')
   const rowMenu=async title=>{await expandAll();const r=win.locator('.t2sw-plug-item',{hasText:title}).first();await r.hover();await r.locator('.t2sw-plug-row-menu').click()}
@@ -67,20 +67,24 @@ async function main(){
   })
   await section('1 运行中不留旧笔记',async()=>{
   // 1 运行中不留旧笔记
-  await openRow('old-video')
-  check('fixture: the old note and Chat are showing before the run',await visibleText('unique-marker-old-video')&&await composerVisible())
+  // 11-08 阅读页:青鸟一页里放原内容 + 笔记 + 问答,不再开宿主分栏;整理中右列只有进度。
+  const insideReader=needle=>win.evaluate(n=>{const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);const hits=[];while(w.nextNode()){const e=w.currentNode.parentElement;if(w.currentNode.textContent.includes(n)&&e.getClientRects().length)hits.push(!!e.closest('.bb-reader .bb-r-note'))}return hits},needle)
+  await openRow('old-video');await win.waitForSelector('.bb-reader .bb-r-note [contenteditable="true"]',{timeout:8000}).catch(()=>{});await wait(600)
+  const oldHits=await insideReader('unique-marker-old-video')
+  check('fixture: the old note shows in the reader, not in a host split',oldHits.length>=1&&oldHits.every(Boolean),JSON.stringify(oldHits))
+  check('no host Chat split next to the reader',!await composerVisible())
   await back()
   stub.script(run(answer('Fresh video note','douyin','https://www.douyin.com/video/9demo'),3500))
-  await win.locator('[data-url]').fill('https://www.douyin.com/video/9demo');await win.locator('[data-go]').click();await win.waitForSelector('.bb-native [data-native-note]');await wait(900)
+  await win.locator('[data-url]').fill('https://www.douyin.com/video/9demo');await win.locator('[data-go]').click();await win.waitForSelector('.bb-reader .bb-r-progress');await wait(900)
   check('run hides the previous note',!await visibleText('unique-marker-old-video'))
-  check('run hides Chat',!await composerVisible())
-  check('run says where the note will appear',(await win.locator('[data-native-note]').innerText()).includes('整理完成后'))
-  check('run omits the Chat hint',await win.locator('.bb-native-note span').count()===0)
+  check('run hides Chat',!await composerVisible()&&await win.locator('.bb-reader [data-askbox]').isVisible().then(v=>!v))
+  check('run says where the note will appear',(await win.locator('.bb-r-progress').innerText()).includes('整理好后笔记出现在这里'))
   await win.screenshot({path:path.join(OUT,'run.png')})
   await win.waitForFunction(()=>__bb.queue.items.some(it=>it.status==='completed'),null,{timeout:15000});await wait(1800)
   fresh=index().items.find(x=>x.title==='Fresh video note')
-  check('finished run shows the new note',fresh&&await visibleText('Fixture body for Fresh video note'))
-  check('finished run brings Chat back',await composerVisible())
+  const freshHits=await insideReader('Fixture body for Fresh video note')
+  check('finished run shows the new note in the reader',fresh&&freshHits.length>=1&&freshHits.every(Boolean),JSON.stringify(freshHits))
+  check('the old note never comes back',!await visibleText('unique-marker-old-video'))
 
   })
   await section('7 标题只出现一次',async()=>{
@@ -95,25 +99,69 @@ async function main(){
   await section('2 普通链接',async()=>{
   // 2 普通链接
   await openRow('web-link')
-  check('plain link has no player',await win.locator('.bb-native .bb-media').count()===0&&await win.locator('.bb-link-card').count()===1)
-  check('plain link opens the page',await win.locator('.bb-link-card [data-browser]').getAttribute('href')==='https://example.com/posts/why-notes-rot')
+  check('plain link has no player',await win.locator('.bb-reader .bb-media').count()===0&&await win.locator('.bb-reader .bb-link-card').count()===1)
+  check('plain link opens the page',await win.locator('.bb-reader [data-source]').getAttribute('href')==='https://example.com/posts/why-notes-rot')
+  check('an unorganized link says so above its note',(await win.locator('.bb-reader .bb-r-bar').innerText()).includes('还没整理'))
   await win.screenshot({path:path.join(OUT,'link.png')})
   const runsBefore=stub.seen.runs.length
   stub.script(run(answer('Why notes rot','','https://example.com/posts/why-notes-rot')))
-  await win.locator('.bb-link-card [data-organize]').click()
+  await win.locator('.bb-reader .bb-r-bar [data-organize]').click()
   await win.waitForFunction(()=>__bb.queue.items.filter(it=>it.status==='completed').length===2,null,{timeout:15000});await wait(1200)
   const msg=stub.seen.runs[runsBefore]?.message||''
   check('organizing a page fetches it instead of running video scripts',msg.includes('web_fetch')&&!msg.includes('Run scripts/transcribe.py'))
   const organized=row('web-link')
   check('organizing replaces the bookmark row',organized?.title==='Why notes rot'&&index().items.filter(x=>x.videoUrl==='https://example.com/posts/why-notes-rot').length===1&&organized.kind!=='link')
   check('organizing keeps the old note',fs.existsSync(path.join(vault,items[1].notePath))&&organized.notePath!==items[1].notePath)
-  check('organized page still has no player',await win.locator('.bb-native .bb-media').count()===0)
+  check('organized page still has no player',await win.locator('.bb-reader .bb-media').count()===0)
   const againFrom=stub.seen.runs.length
   stub.script(run(answer('Why notes rot again','','https://example.com/posts/why-notes-rot')))
-  await win.locator('.bb-native [data-restart]').click();await win.locator('.bb-menu .bb-btn.primary').click()
+  await win.locator('.bb-reader [data-more]').click();await win.locator('.bb-menu div',{hasText:'重新整理'}).first().click();await win.locator('.bb-menu .bb-btn.primary').click()
   await win.waitForFunction(()=>__bb.queue.items.filter(it=>it.status==='completed').length===3,null,{timeout:15000});await wait(800)
   check('organizing a web page again stays on the page path',(stub.seen.runs[againFrom]?.message||'').includes('web_fetch'))
 
+  })
+  await section('11 笔记编辑与写盘',async()=>{
+  const notePath=path.join(vault,fresh.notePath),before=fs.readFileSync(notePath,'utf8')
+  await win.evaluate(i=>__bb.open(i),fresh.id);const ed=win.locator('.bb-reader .bb-r-note [contenteditable="true"]').first();await ed.waitFor({timeout:8000});await wait(1200)
+  check('opening a note does not rewrite it',fs.readFileSync(notePath,'utf8')===before)
+  await ed.click();await win.keyboard.press(process.platform==='darwin'?'Meta+ArrowDown':'Control+End');await win.keyboard.type(' typed-by-harness');await wait(2200)
+  const after=fs.readFileSync(notePath,'utf8')
+  check('an edit lands in the note file',after.includes('typed-by-harness'),after.slice(-120))
+  check('the properties stay as they were',after.startsWith(before.match(/^---\n[\s\S]*?\n---\n/)[0]))
+  check('the reader says it saved',(await win.locator('.bb-reader [data-state]').innerText()).includes('已保存'))
+  fs.writeFileSync(notePath,after.replace('typed-by-harness','changed-outside'));await wait(1500)
+  check('an outside change shows up when nothing is pending',await visibleText('changed-outside'))
+  await ed.click();await win.keyboard.type(' racing-edit');fs.writeFileSync(notePath,fs.readFileSync(notePath,'utf8')+'\nsecond-outside-change\n');await wait(2500)
+  const raced=fs.readFileSync(notePath,'utf8')
+  check('a pending edit never overwrites an outside change',raced.includes('second-outside-change')&&!raced.includes('racing-edit'))
+  check('the reader offers to reload',(await win.locator('.bb-reader [data-state]').innerText()).includes('没有覆盖'))
+  await win.locator('.bb-reader [data-state] button').click();await wait(800)
+  check('reload shows the file again',await visibleText('second-outside-change'))
+  await win.screenshot({path:path.join(OUT,'reader-note.png')})
+  })
+  await section('12 各类型的左列',async()=>{
+  const extra=[
+   {id:'post',title:'London rent checklist',kind:'video',meta:{title:'London rent checklist',platform:'xiaohongshu',author:'6028fabc1000000001005093',duration:0,description:'Viewing tips line one\n#rent'},sourceUrl:'https://www.xiaohongshu.com/explore/abc',summaryMarkdown:'# London rent checklist\n\n![](https://ci.xiaohongshu.com/a.jpg)\n![](https://ci.xiaohongshu.com/b.jpg)\n\n## 正文\n\nViewing tips line one',segments:[]},
+   {id:'song',title:'Old bookshop',kind:'video',meta:{title:'Old bookshop',platform:'netease',author:'Far Hills',album:'Slow train',duration:252},sourceUrl:'https://music.163.com/song?id=1',summaryMarkdown:'# Old bookshop\n\nAbout the song',segments:[{start:12,end:20,text:'lyric line one'},{start:26,end:30,text:'lyric line two'}]},
+  ]
+  for(const e of extra){const notePath=`${FOLDER}/${e.id}.md`;fs.writeFileSync(path.join(vault,notePath),`---\nbluebird_id: ${e.id}\n---\nNote of ${e.id}\n`);fs.writeFileSync(path.join(dir,'.bluebird',e.id+'.json'),JSON.stringify({...e,notePath,chapters:[],tags:[]}))}
+  const idx=index();idx.items.unshift(...extra.map(e=>({id:e.id,title:e.title,platform:e.meta.platform,videoUrl:e.sourceUrl,kind:e.kind,folderId:null,notePath:`${FOLDER}/${e.id}.md`,date:'2026-11-08'})));fs.writeFileSync(path.join(dir,'.bluebird-index.json'),JSON.stringify(idx));await win.evaluate(()=>__bb.bus.emit({type:'saved'}));await wait(600)
+  await openRow('post')
+  check('an image post shows a gallery, not a player',await win.locator('.bb-reader .bb-r-gal').count()===1&&await win.locator('.bb-reader .bb-media').count()===0&&await win.locator('.bb-reader .bb-r-thumbs button').count()===2)
+  check('an image post shows its text',(await win.locator('.bb-reader .bb-r-text').innerText()).includes('Viewing tips line one'))
+  const postMeta=await win.locator('.bb-reader [data-metaline]').innerText()
+  check('a platform ID is not shown as the author',!postMeta.includes('6028fabc')&&postMeta.includes('图文 2 张'),postMeta)
+  await win.screenshot({path:path.join(OUT,'reader-post.png')})
+  await openRow('song')
+  check('a song shows its cover card and lyrics',await win.locator('.bb-reader .bb-r-song').count()===1&&await win.locator('.bb-reader .bb-media').count()===0&&await win.locator('.bb-reader .bb-r-seg.static').count()===2)
+  check('a song links out to its app',(await win.locator('.bb-reader [data-source]').innerText()).includes('网易云音乐'))
+  await win.screenshot({path:path.join(OUT,'reader-song.png')})
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(900,860));await wait(900)
+  check('a narrow window stacks into one column with three tabs',await win.locator('.bb-reader.narrow').count()===1&&await win.locator('.bb-reader .bb-r-srctab').isVisible())
+  await win.locator('.bb-reader .bb-r-srctab').click();await wait(300)
+  check('the first tab shows the lyrics',await win.locator('.bb-reader .bb-r-seg.static').first().isVisible())
+  await win.screenshot({path:path.join(OUT,'reader-narrow.png')})
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(1440,900));await wait(600)
   })
   await section('4 移动',async()=>{
   // 4 移动
@@ -161,11 +209,18 @@ async function main(){
   await section('6 用词与控件',async()=>{
   // 6 用词与控件
   await openRow('old-video')
-  const hdr=await win.locator('.bb-native .bb-hdr').innerText()
-  check('header uses organize wording',hdr.includes('重新整理')&&!/总结|分析/.test(hdr),hdr.replace(/\n/g,' '))
-  const radius=await win.evaluate(()=>[getComputedStyle(document.querySelector('.bb-native [data-restart]')).borderTopLeftRadius,getComputedStyle(document.documentElement).getPropertyValue('--radius-sm').trim()])
+  const hdr=await win.locator('.bb-reader .bb-r-hd').innerText()
+  check('header is one line with no action pile',(await win.locator('.bb-reader .bb-r-hd').boundingBox()).height<70&&!/总结|分析|重新整理/.test(hdr),hdr.replace(/\n/g,' '))
+  // 前面「撤销」留下的通知卡浮在窗口右上角,会盖住「更多」:先关掉
+  for(const c of await win.locator('.ntf-close').all())await c.click().catch(()=>{});await wait(400)
+  const moreHit=await win.evaluate(()=>{const b=document.querySelector('.bb-reader [data-more]');if(!b)return 'no button';const r=b.getBoundingClientRect(),e=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return e===b?'ok':(e?e.className||e.tagName:'nothing')+' '+JSON.stringify([r.left,r.top,r.width,r.height])})
+  check('the more button is reachable',moreHit==='ok',moreHit)
+  await win.locator('.bb-reader [data-more]').click()
+  const moreText=await win.locator('.bb-menu').innerText()
+  check('the more menu uses organize wording',moreText.includes('重新整理')&&!/总结|分析/.test(moreText),moreText.replace(/\n/g,' / '))
+  const radius=await win.evaluate(()=>[getComputedStyle(document.querySelector('.bb-reader [data-more]')).borderTopLeftRadius,getComputedStyle(document.documentElement).getPropertyValue('--radius-sm').trim()])
   check('buttons follow the host control radius',radius[0]===radius[1],radius.join(' vs '))
-  await win.locator('.bb-native [data-export]').click()
+  await win.locator('.bb-menu div',{hasText:'导出…'}).first().click()
   const exportText=await win.locator('.bb-menu').innerText()
   check('menus have no emoji',!/\p{Extended_Pictographic}/u.test(exportText),exportText.replace(/\n/g,' / '))
   await win.keyboard.press('Escape')
@@ -232,7 +287,7 @@ async function main(){
   // 回车 + ⌘ 收藏并整理,运行中在列表里、不在索引里
   stub.script(run(answer('Queued video','douyin','https://www.douyin.com/video/1live'),3000))
   await win.locator('[data-url]').fill('https://www.douyin.com/video/1live');await win.locator('[data-url]').press(process.platform==='darwin'?'Meta+Enter':'Control+Enter')
-  await win.waitForSelector('.bb-native [data-native-note]');await wait(500)
+  await win.waitForSelector('.bb-reader .bb-r-progress');await wait(500)
   check('Mod+Enter organizes',stub.seen.runs.length===runs0+1||await win.evaluate(()=>__bb.queue.items.some(i=>i.url==='https://www.douyin.com/video/1live')))
   const liveRow=await taskRows()
   check('a running task is in the left list at once',liveRow.length===1,liveRow.join(' | '))
@@ -243,7 +298,7 @@ async function main(){
   check('home shows In progress first',(await sections())[0]==='进行中'&&await win.locator('.bb-shelf .bb-qrow[data-task-id]').count()===1)
   await win.screenshot({path:path.join(OUT,'home-running.png')})
   await win.locator('.wb-view--left [data-row-key^="run:"]').click();await wait(400)
-  check('clicking the running row shows its progress',await win.locator('.bb-native [data-native-note]').count()===1)
+  check('clicking the running row shows its progress',await win.locator('.bb-reader .bb-r-progress').count()===1)
   await back()
   await win.waitForFunction(()=>__bb.queue.items.some(i=>i.url==='https://www.douyin.com/video/1live'&&i.status==='completed'),null,{timeout:15000});await wait(900)
   check('a finished task swaps its run row for the saved row',(await taskRows()).length===0&&index().items.some(x=>x.videoUrl==='https://www.douyin.com/video/1live'))

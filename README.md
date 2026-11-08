@@ -30,11 +30,11 @@ Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-r
 
 | 组件 | 包内位置 | 作用 |
 |---|---|---|
-| 插件 `bluebird` | 根(`manifest.json` + `main.js`) | 视频/队列面板；总结与追问交给宿主原生 Amadeus / ChatView |
+| 插件 `bluebird` | 根(`manifest.json` + `main.js`) | 收藏台与阅读页:左列原内容(视频 / 图文 / 音乐 / 网页),右列笔记(宿主编辑器)与问答 |
 | 「青鸟收藏夹」Agent | `agents/bluebird/` | 引擎侧智能体,视图驱动它跑分析;引擎启动时**播种一次**到 `tangu/agents/`,之后独立存在(升级不覆盖你的改动) |
 | 「青鸟视频分析」技能 | `agents/bluebird/skills/bluebird-video/` | 转录(yt-dlp)+ 总结/问答/翻译工作流(agent 级,随 Agent 播种);另带**音乐剪藏**支线 `scripts/music_meta.py`(网易云 / QQ 音乐 / Apple Music 单曲 → 歌词+热评+封面收藏卡,不下音频不走 ASR) |
 | 「青鸟链接收藏」技能 | `skills/bluebird-link/` | 文章/文档链接 → 抓正文 → 笔记存进 vault `Links/`(**bundle 级,原地读,所有 agent 可见**,所以在任意 Tangu 对话里说「存一下」就能用;视频链接不接,引导去工作台)。设置项「增强自动模式」经 `<vault>/.bluebird/link-mode.json` 镜像给它 —— 设置值在渲染进程的 localStorage,技能在引擎进程,只有 vault 是两边都够得着的地方 |
-| 「青鸟收藏夹」Space | `spaces/bluebird/` | 收藏侧栏 + 视频 + Amadeus + ChatView 原生分栏,随插件启停显隐 |
+| 「青鸟收藏夹」Space | `spaces/bluebird/` | 收藏侧栏 + 青鸟阅读页,随插件启停显隐 |
 
 ## 转录依赖
 
@@ -44,10 +44,10 @@ Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-r
 
 ## 用法
 
-1. 从 Ribbon 打开「青鸟收藏夹」Space，可看到收藏侧栏、视频、Amadeus 与 ChatView 原生分栏；三块主视图可独立滚动和拖动宽度。命令面板(⌘/Ctrl-K)「青鸟收藏夹:打开」仍可单独打开兼容版一体式视图。
+1. 从 Ribbon 打开「青鸟收藏夹」Space：左边是收藏列表，主区是青鸟。打开一条收藏，左列是原内容（视频 + 字幕、图文 + 正文、音乐封面 + 歌词、网页卡），右列是笔记和问答；主区不到 760 宽时改成单列三标签。命令面板(⌘/Ctrl-K)「青鸟收藏夹:打开」仍可单独打开兼容版一体式视图。
 2. 贴链接后可直接点「收藏链接」保存。需要分析时,贴视频链接、选总结模板(默认「通用」)、点「添加到分析队列」。音乐单曲链接(网易云 / QQ 音乐 / Apple Music)也直接贴 —— 自动走音乐剪藏,模板与详细度对它不适用。视图驱动「青鸟收藏夹」Agent:抓字幕 → 出 Markdown 总结,过程实时显示。
-3. 整理完自动存成 Amadeus 笔记(`{工作文件夹}/{标题}.md`,日期与来源写在笔记属性里),并同步到同屏 Amadeus 文档区；滚动文档不会移动视频。
-4. 想追问 / 翻译:直接在同屏 ChatView 输入，它会自动引用当前青鸟笔记；也可以在 Tangu 里直接和「青鸟收藏夹」Agent 对话。
+3. 整理完自动存成 Amadeus 笔记(`{工作文件夹}/{标题}.md`,日期与来源写在笔记属性里),整理好后笔记直接出现在阅读页右列，可以就地修改（只在你动过之后保存；文件在别处改过时不覆盖，提示重新载入）。整理中右列只显示进度。
+4. 想追问 / 翻译:切到右列「问答」，只问这一条收藏(每条收藏一个会话)；也可以在 Tangu 里直接和「青鸟收藏夹」Agent 对话。
 
 ## 文档里的时间引用
 
