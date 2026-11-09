@@ -176,6 +176,14 @@ def extract_subtitles(info, work_dir, lang_priority, headers=None):
 # provider → Forsion 云),用户在「设置 → 语音」里已经选好了。脚本再自带一个 ASR 供应商 =
 # 第二套配置、第二个 key、第二份账单。故只负责把音频抠成 16k 单声道 WAV 并交出路径。
 
+# 选流规则。小红书、抖音这类平台只有「画面 + 声音」合在一起的流,没有单独音轨,`ba` 落空后 `b` 会挑最大的那份:
+# 新版 yt-dlp 会给小红书多列一份「原画」(direct,高度未知),一条 5 分钟的视频 800 MB,而平台自己的 720p 版只有 48 MB。
+# 转写只要声音、「音频」档存下来的也只是看个画面,所以合流平台一律取 720p 及以下;都没有时退到最小那份(`w`),
+# 绝不回到 `b`。高度未知的原画不满足 height 过滤,两条规则都碰不到它。有单独音轨的平台(B 站、YouTube)仍由 `ba` 先接住。
+AUDIO_FORMAT = "ba/b[height<=720]/w"
+VIDEO_FORMAT = "bv*[height<=1080]+ba/b[height<=1080]/w"
+
+
 def download_audio(url, work_dir, headers, info=None):
     """下载 bestaudio 转 **16kHz 单声道 WAV**(需 ffmpeg)。
 
@@ -185,7 +193,7 @@ def download_audio(url, work_dir, headers, info=None):
     from yt_dlp import YoutubeDL
     opts = {
         "outtmpl": str(work_dir / "audio.%(ext)s"),
-        "format": "ba/b",
+        "format": AUDIO_FORMAT,
         "quiet": True,
         "noprogress": True,
         "noplaylist": True,
@@ -302,7 +310,7 @@ def archive_source(url, info, save_to, meta, headers, level, max_bytes):
     with tempfile.TemporaryDirectory(prefix="bluebird_archive_") as temp:
         opts = {
             "outtmpl": str(Path(temp) / "media.%(ext)s"), "quiet": True, "noprogress": True, "noplaylist": True,
-            "format": "bv*[height<=1080]+ba/b[height<=1080]/b" if level == "video" else "ba/b",
+            "format": VIDEO_FORMAT if level == "video" else AUDIO_FORMAT,
             "merge_output_format": "mp4", "http_headers": headers, "http_chunk_size": 10485760,
             "socket_timeout": 45, "retries": 1, "fragment_retries": 1,
         }

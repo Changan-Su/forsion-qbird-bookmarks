@@ -152,6 +152,45 @@ class RetrievalChecks(unittest.TestCase):
             module.download_audio("u", pathlib.Path(temp), {}, info)
         self.assertTrue(processed and all("requested_formats" not in item for item in processed))
 
+    def test_audio_download_and_archive_use_the_compressed_selectors(self):
+        seen = []
+        class Downloader:
+            def __init__(self, options): seen.append(options.get("format"))
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def extract_info(self, *args, **kwargs): pass
+            def process_ie_result(self, info, download=False): return {"requested_formats": [{"filesize": 1}]}
+        with tempfile.TemporaryDirectory() as temp, patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=Downloader)}):
+            (pathlib.Path(temp)/"audio.wav").write_bytes(b"RIFF")
+            module.download_audio("u", pathlib.Path(temp), {})
+            module.archive_source("u", {"formats": []}, temp, {}, {}, "video", None)
+            module.archive_source("u", {"formats": []}, temp, {}, {}, "audio", None)
+        self.assertEqual(seen, [module.AUDIO_FORMAT, module.VIDEO_FORMAT, module.AUDIO_FORMAT])
+        self.assertFalse(any(rule.endswith("/b") for rule in seen))
+
+    @unittest.skipUnless(importlib.util.find_spec("yt_dlp"), "yt-dlp not installed")
+    def test_merged_only_posts_skip_the_original_upload(self):
+        # 11-09 实测的小红书形状:两份 720p 合流 + 一份高度未知的原画(800 MB)
+        from yt_dlp import YoutubeDL
+        def fmt(fid, height, size):
+            return {"format_id": fid, "url": "https://example.invalid/" + fid, "ext": "mp4", "height": height,
+                    "width": height and height * 16 // 9, "vcodec": "h264" if height else None,
+                    "acodec": "aac" if height else None, "filesize": size, "protocol": "https"}
+        info = {"id": "x", "title": "x", "extractor": "test", "extractor_key": "Test", "webpage_url": "https://example.invalid/x",
+                "formats": [fmt("0", 720, 50_000_000), fmt("1", 720, 50_700_000), fmt("direct", None, 839_000_000)]}
+        for rule in (module.AUDIO_FORMAT, module.VIDEO_FORMAT):
+            with YoutubeDL({"quiet": True, "format": rule}) as ydl:
+                picked = ydl.process_ie_result(dict(info), download=False)
+            self.assertNotEqual(picked["format_id"], "direct", rule)
+            self.assertEqual(picked["height"], 720, rule)
+        info["formats"] = [fmt("only", 1440, 900_000_000), fmt("small", 1080, 300_000_000)]
+        with YoutubeDL({"quiet": True, "format": module.AUDIO_FORMAT}) as ydl:
+            self.assertEqual(ydl.process_ie_result(dict(info), download=False)["format_id"], "small")
+        info["formats"] = [{"format_id": "ba", "url": "https://example.invalid/a", "ext": "m4a", "vcodec": "none", "acodec": "aac", "protocol": "https"},
+                           fmt("v", 720, 50_000_000)]
+        with YoutubeDL({"quiet": True, "format": module.AUDIO_FORMAT}) as ydl:
+            self.assertEqual(ydl.process_ie_result(dict(info), download=False)["format_id"], "ba")
+
     def test_image_posts_respect_the_size_limit_and_a_bad_folder_does_not_abort(self):
         class Response:
             headers = {"Content-Type": "image/jpeg", "Content-Length": "5000"}
