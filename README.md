@@ -2,11 +2,11 @@
 
 把一条视频链接变成可读、可检索、可入库的知识笔记 —— 直接在 Forsion 工作台里完成。
 
-**宿主版本：** 2.3.1 需要 Forsion 桌面端 2.13.6 或以上，旧客户端请先升级桌面端。**Host version:** 2.3.1 requires Forsion desktop 2.13.6 or later; update the desktop app before updating this plugin.
+**宿主版本：** 2.4.0 需要 Forsion 桌面端 2.13.6 或以上；B 站账号需要 2.13.8 或以上（2.14.0 正式版已包含）。**Host version:** 2.4.0 requires Forsion desktop 2.13.6 or later; the Bilibili account needs 2.13.8 or later (included in 2.14.0).
 
-**2.3.1:** 新建收藏时可填写整理要求，常用要求可编辑；仅收藏保留要求，任务固定提交时的原文。原生阅读工作台按需展开，任务日志可在成功、失败或取消后导出。断线恢复会接回原运行，重新整理保留已有笔记。新版桌面宿主支持一次自动迁移旧资料到 `Plugins/bluebird`，保留原目录备份并尊重手动设置；同时修复 B 站页面数据缺失和主 CDN 获取失败时的回退。
+**2.4.0:** 打开一条收藏变成一页阅读页：左边原内容（视频 + 字幕、图文、音乐、网页），右边可就地编辑的笔记和只问这一条的问答；整理时不会再露出上一篇笔记。B 站会员、高清或被风控的视频可以连接自己的账号获取（扫 B 站二维码，登录信息只留在本机）。新增收藏台主页、文件夹树、媒体存储页与按条清理，并修复小红书无音轨视频、B 站 HTTP 567 和抖音要 Cookie 的获取失败。
 
-**English:** Add editable instructions to each bookmark. Save-only preserves them; analysis snapshots them. Native reading companions open on demand. Saved logs remain exportable after success, failure or cancellation. Reconnect resumes the original run and new result versions keep existing notes. Supported desktop hosts migrate legacy data once to `Plugins/bluebird`, retaining the original folder and respecting custom settings. Bilibili retrieval now handles missing page metadata and falls back to platform CDN mirrors. Platform restrictions can still prevent retrieval; local subtitle/media import is available.
+**English:** Opening a bookmark now shows one reading page: the original content on the left (video with transcript, image posts, songs, web pages) and the note, edited in place, with Q&A about this bookmark on the right. A running task no longer shows the previous note. Members-only, HD or rate-limited Bilibili videos can be fetched with your own account by scanning Bilibili's QR code; the sign-in stays on this computer. Also new: a library desk home, a folder tree, a media storage page with per-item cleanup, and fixes for Xiaohongshu videos without audio, Bilibili HTTP 567 and Douyin asking for cookies.
 
 Preview a local update with `python3 upgrade.py dev --dry-run` (or `prod --dry-run`). `bash install.sh dev` upgrades the existing manifest id, including installations named `item`, with a rollback copy under `backups/plugin-upgrades/`. It does not rewrite seeded agent configuration, memory, modified skills or vault data. Restart the host to load the bundle; the engine's fingerprint-based skill updater preserves user changes. Full focused/reading layout and filesystem-scoped writes require the companion-capable host supplied with this change. Older hosts retain existing bookmark reading/export; new saves require the paired host update.
 

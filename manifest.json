@@ -2,7 +2,7 @@
   "id": "bluebird",
   "name": "青鸟收藏夹",
   "nameEn": "Bluebird",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "apiVersion": 1,
   "minAppVersion": "2.13.6",
   "description": "收藏链接，按你的要求整理成双语文本或学习资料。支持分析日志导出和旧版资料自动迁移。仅收藏与阅读已有资料可离线完成；视频获取和 AI 整理依赖宿主的执行、转写及模型能力。",
