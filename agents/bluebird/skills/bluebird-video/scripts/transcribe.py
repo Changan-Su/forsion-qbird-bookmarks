@@ -176,15 +176,18 @@ def extract_subtitles(info, work_dir, lang_priority, headers=None):
 # provider → Forsion 云),用户在「设置 → 语音」里已经选好了。脚本再自带一个 ASR 供应商 =
 # 第二套配置、第二个 key、第二份账单。故只负责把音频抠成 16k 单声道 WAV 并交出路径。
 
-# 选流规则。小红书、抖音这类平台只有「画面 + 声音」合在一起的流,没有单独音轨,`ba` 落空后 `b` 会挑最大的那份:
+# 选流规则。小红书、抖音这类平台只有「画面 + 声音」合在一起的流,没有单独音轨,`ba` 落空后 `b` 会挑最好的那份:
 # 新版 yt-dlp 会给小红书多列一份「原画」(direct,高度未知),一条 5 分钟的视频 800 MB,而平台自己的 720p 版只有 48 MB。
-# 转写只要声音、「音频」档存下来的也只是看个画面,所以合流平台一律取 720p 及以下;都没有时退到最小那份(`w`),
-# 绝不回到 `b`。高度未知的原画不满足 height 过滤,两条规则都碰不到它。有单独音轨的平台(B 站、YouTube)仍由 `ba` 先接住。
-AUDIO_FORMAT = "ba/b[height<=720]/w"
-VIDEO_FORMAT = "bv*[height<=1080]+ba/b[height<=1080]/w"
+# 所以合流平台先找 720p 以内、再找 1080p 以内,两样都没有才退到 `b`。高度未知的原画不满足 height 过滤,只有它一份时才会被选。
+# ⚠️别用 `w` 兜底:它按画质排不按体积(没标高度的原画可能排在「最差」),纯音频的音乐链接还会挑到最低码率(Codex 11-09)。
+# 有单独音轨的平台(B 站、YouTube)仍由 `ba` 先接住。
+AUDIO_FORMAT = "ba/b[height<=720]/b[height<=1080]/b"
+# 「完整视频」档没有字幕时,转写下到的合流文件直接拿去存档,所以这一份要按 1080p 上限下,别先下 720p 再存它。
+VIDEO_TRANSCRIBE_FORMAT = "ba/b[height<=1080]/b"
+VIDEO_FORMAT = "bv*[height<=1080]+ba/b[height<=1080]/b"
 
 
-def download_audio(url, work_dir, headers, info=None):
+def download_audio(url, work_dir, headers, info=None, fmt=AUDIO_FORMAT):
     """下载 bestaudio 转 **16kHz 单声道 WAV**(需 ffmpeg)。
 
     为什么固定 16k/mono/WAV:本地 SenseVoice 就吃这个采样率,且宿主是自己解析 WAV 头
@@ -193,7 +196,7 @@ def download_audio(url, work_dir, headers, info=None):
     from yt_dlp import YoutubeDL
     opts = {
         "outtmpl": str(work_dir / "audio.%(ext)s"),
-        "format": AUDIO_FORMAT,
+        "format": fmt,
         "quiet": True,
         "noprogress": True,
         "noplaylist": True,
@@ -713,7 +716,7 @@ def run(url, save_to=None, level="audio", max_mb=None):
         try:
             if not shutil.which("ffmpeg"):
                 raise RetrievalError("dependencies", "ffmpeg is required for audio transcription")
-            audio = download_audio(url, work_dir, headers, info)
+            audio = download_audio(url, work_dir, headers, info, VIDEO_TRANSCRIBE_FORMAT if level == "video" else AUDIO_FORMAT)
         except Exception as exc:
             # 视频已下到 work_dir、只是抽不出音轨:这种帖子没有语音,不算抓取失败
             silent = silent_video_result(info, work_dir, url, media_dir, headers, max_bytes)

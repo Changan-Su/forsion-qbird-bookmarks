@@ -166,30 +166,40 @@ class RetrievalChecks(unittest.TestCase):
             module.archive_source("u", {"formats": []}, temp, {}, {}, "video", None)
             module.archive_source("u", {"formats": []}, temp, {}, {}, "audio", None)
         self.assertEqual(seen, [module.AUDIO_FORMAT, module.VIDEO_FORMAT, module.AUDIO_FORMAT])
-        self.assertFalse(any(rule.endswith("/b") for rule in seen))
 
     @unittest.skipUnless(importlib.util.find_spec("yt_dlp"), "yt-dlp not installed")
     def test_merged_only_posts_skip_the_original_upload(self):
-        # 11-09 实测的小红书形状:两份 720p 合流 + 一份高度未知的原画(800 MB)
         from yt_dlp import YoutubeDL
-        def fmt(fid, height, size):
+        def fmt(fid, height, size, tbr=None):
             return {"format_id": fid, "url": "https://example.invalid/" + fid, "ext": "mp4", "height": height,
                     "width": height and height * 16 // 9, "vcodec": "h264" if height else None,
-                    "acodec": "aac" if height else None, "filesize": size, "protocol": "https"}
-        info = {"id": "x", "title": "x", "extractor": "test", "extractor_key": "Test", "webpage_url": "https://example.invalid/x",
-                "formats": [fmt("0", 720, 50_000_000), fmt("1", 720, 50_700_000), fmt("direct", None, 839_000_000)]}
-        for rule in (module.AUDIO_FORMAT, module.VIDEO_FORMAT):
+                    "acodec": "aac" if height else None, "filesize": size, "tbr": tbr, "protocol": "https"}
+        def audio(fid, abr):
+            return {"format_id": fid, "url": "https://example.invalid/" + fid, "ext": "mp3", "vcodec": "none",
+                    "acodec": "mp3", "abr": abr, "protocol": "https"}
+        def pick(rule, formats):
+            info = {"id": "x", "title": "x", "extractor": "test", "extractor_key": "Test",
+                    "webpage_url": "https://example.invalid/x", "formats": formats}
             with YoutubeDL({"quiet": True, "format": rule}) as ydl:
-                picked = ydl.process_ie_result(dict(info), download=False)
-            self.assertNotEqual(picked["format_id"], "direct", rule)
-            self.assertEqual(picked["height"], 720, rule)
-        info["formats"] = [fmt("only", 1440, 900_000_000), fmt("small", 1080, 300_000_000)]
-        with YoutubeDL({"quiet": True, "format": module.AUDIO_FORMAT}) as ydl:
-            self.assertEqual(ydl.process_ie_result(dict(info), download=False)["format_id"], "small")
-        info["formats"] = [{"format_id": "ba", "url": "https://example.invalid/a", "ext": "m4a", "vcodec": "none", "acodec": "aac", "protocol": "https"},
-                           fmt("v", 720, 50_000_000)]
-        with YoutubeDL({"quiet": True, "format": module.AUDIO_FORMAT}) as ydl:
-            self.assertEqual(ydl.process_ie_result(dict(info), download=False)["format_id"], "ba")
+                return ydl.process_ie_result(info, download=False)["format_id"]
+        # 11-09 实测的小红书形状:两份 720p 合流 + 一份高度未知的原画(800 MB)
+        xhs = [fmt("0", 720, 50_000_000), fmt("1", 720, 50_700_000), fmt("direct", None, 839_000_000)]
+        for rule in (module.AUDIO_FORMAT, module.VIDEO_TRANSCRIBE_FORMAT, module.VIDEO_FORMAT):
+            self.assertNotEqual(pick(rule, xhs), "direct", rule)
+        # 有 1080p 时:转写 / 音频档取 720p,完整视频档(包括没字幕时复用转写那份)取 1080p
+        tiers = [fmt("720", 720, 50_000_000), fmt("1080", 1080, 120_000_000), fmt("direct", None, 839_000_000)]
+        self.assertEqual(pick(module.AUDIO_FORMAT, tiers), "720")
+        self.assertEqual(pick(module.VIDEO_TRANSCRIBE_FORMAT, tiers), "1080")
+        self.assertEqual(pick(module.VIDEO_FORMAT, tiers), "1080")
+        # 网页只有一份标了 1080p + 一份没标的原画:取标了的那份
+        page = [fmt("labeled", 1080, 48_000_000), {"format_id": "orig", "url": "https://example.invalid/o", "ext": "mp4", "filesize": 839_000_000, "protocol": "https"}]
+        self.assertEqual(pick(module.AUDIO_FORMAT, page), "labeled")
+        # 纯音频的音乐链接:各档都取最高码率
+        music = [audio("lo", 32), audio("hi", 320)]
+        for rule in (module.AUDIO_FORMAT, module.VIDEO_TRANSCRIBE_FORMAT, module.VIDEO_FORMAT):
+            self.assertEqual(pick(rule, music), "hi", rule)
+        # 有单独音轨的平台:只下音频
+        self.assertEqual(pick(module.AUDIO_FORMAT, [audio("ba", 128), fmt("v", 720, 50_000_000)]), "ba")
 
     def test_image_posts_respect_the_size_limit_and_a_bad_folder_does_not_abort(self):
         class Response:
