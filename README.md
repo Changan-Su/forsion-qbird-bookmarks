@@ -2,7 +2,9 @@
 
 把一条视频链接变成可读、可检索、可入库的知识笔记 —— 直接在 Forsion 工作台里完成。
 
-**宿主版本：** 2.4.0 需要 Forsion 桌面端 2.13.6 或以上；B 站账号需要 2.13.8 或以上（2.14.0 正式版已包含）。**Host version:** 2.4.0 requires Forsion desktop 2.13.6 or later; the Bilibili account needs 2.13.8 or later (included in 2.14.0).
+**宿主版本：** 2.4.1 需要 Forsion 桌面端 2.13.6 或以上；B 站账号需要 2.13.8 或以上（2.14.0 正式版已包含）。**Host version:** 2.4.1 requires Forsion desktop 2.13.6 or later; the Bilibili account needs 2.13.8 or later (included in 2.14.0).
+
+**2.4.1:** 小红书等合流平台改下平台压缩版（720p 及以下），不再下原画；5 分钟视频从 801 MB 降到 48 MB。更新后重启一次 Forsion 生效。**English:** Platforms without a separate audio track download the compressed 720p-or-lower version instead of the original upload (801 MB → 48 MB for a 5-minute video). Restart Forsion once after updating.
 
 **2.4.0:** 打开一条收藏变成一页阅读页：左边原内容（视频 + 字幕、图文、音乐、网页），右边可就地编辑的笔记和只问这一条的问答；整理时不会再露出上一篇笔记。B 站会员、高清或被风控的视频可以连接自己的账号获取（扫 B 站二维码，登录信息只留在本机）。新增收藏台主页、文件夹树、媒体存储页与按条清理，并修复小红书无音轨视频、B 站 HTTP 567 和抖音要 Cookie 的获取失败。
 

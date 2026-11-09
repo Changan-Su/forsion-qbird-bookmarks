@@ -1,3 +1,10 @@
+## 2.4.1 — 2026-11-09
+
+- Xiaohongshu and other platforms without a separate audio track now download the platform's own compressed version (720p or lower) instead of the original upload. A 5-minute Xiaohongshu video went from 801 MB (1440p, 60 fps) to 48 MB (720p) and from minutes to about 20 seconds. Full video still takes up to 1080p, and the original upload is only used when it is the only version. Bilibili and YouTube still fetch audio only.
+- Restart Forsion once after updating so the new download script takes effect.
+- 小红书这类没有单独音轨的平台，改下平台自己的压缩版（720p 及以下），不再下原画。一条 5 分钟的小红书视频从 801 MB（1440p 60 帧）降到 48 MB（720p），获取从几分钟变成 20 秒左右。「完整视频」档仍取最高 1080p；只有原画一个版本时才会下原画。B 站、YouTube 仍只下音频。
+- 更新后重启一次 Forsion，新的下载脚本才会生效。
+
 ## 2.4.0 — 2026-11-09
 
 Bilibili account / B 站账号
