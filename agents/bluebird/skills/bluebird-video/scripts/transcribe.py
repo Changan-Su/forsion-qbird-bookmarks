@@ -459,6 +459,33 @@ def build_meta(info, fallback_url):
     }
 
 
+# YouTube 对机房 IP / 代理常回「Sign in to confirm you're not a bot」。ignore_no_formats_error 之下
+# yt-dlp 不抛,只回一个没有流、时长 0、有标题和封面的 info —— 长得和图文帖一样。拒绝理由只剩一条警告。
+SIGN_IN_WALL = re.compile(r"sign in to confirm|not a bot", re.I)
+
+
+class ProbeLog:
+    """yt-dlp 的日志接收器:警告、错误照旧写到 stderr(调用方看 stderr 尾巴),同时记下警告供上面那道闸用。"""
+    def __init__(self):
+        self.warnings = []
+
+    def debug(self, msg):  # 设了 logger 后屏幕输出都走这里;quiet 下本来就不显示,stdout 只留一行 JSON
+        pass
+
+    info = debug
+
+    def warning(self, msg):
+        self.warnings.append(str(msg))
+        print("WARNING: %s" % msg, file=sys.stderr)
+
+    def error(self, msg):
+        print(msg, file=sys.stderr)
+
+
+def sign_in_wall(warnings):
+    return next((w for w in warnings if SIGN_IN_WALL.search(w)), None)
+
+
 class RetrievalError(RuntimeError):
     def __init__(self, stage, cause):
         self.stage = stage
@@ -560,6 +587,42 @@ def failure_result(err):
     blocked = bool(re.search(r"(?:\b412\b|\b567\b|request was banned|forbidden|login|required|sign.?in)", message, re.I))
     return {"ok": False, "error": {"stage": getattr(err, "stage", "dependencies"), "message": message, "code": code.group(1) if code else "", "blocked": blocked},
             "diagnostics": diagnostics(), "nextActions": ["Open the source in your browser", "Import local media or subtitles", "Retry after the source is accessible"]}
+
+
+def bili_page_denied(exc):
+    """视频页拿不到可用的初始状态:页面改版(没有 initial state),或风控按 IP 拦下(机房 IP / 代理常回 412)。
+    两种都改走播放器自己的签名接口;别的错误(404、已删)照旧报错。"""
+    msg = str(exc).lower()
+    return "unable to extract initial state" in msg or bool(re.search(r"http error 412\b", msg))
+
+
+BILI_ANON_COOKIES = ("buvid3", "b_nut")
+
+
+def warm_bili_cookies(ydl, headers):
+    """像匿名浏览器那样先开一次 B 站首页,拿平台种下的匿名 Cookie(buvid3、b_nut)。
+    视频页被 412 拦下时 cookiejar 里什么都没有,不带它们的接口请求同样回 412(实测)。
+    请求本身不加 Cookie 头;已有 buvid3 就不再开。尽力而为:失败只记一行,原来的错误照常上报。"""
+    try:
+        if any(c.name == "buvid3" for c in getattr(ydl, "cookiejar", None) or []):
+            return
+        from yt_dlp.networking import Request
+        anon = {k: v for k, v in (headers or {}).items() if k.lower() != "cookie"}
+        ydl.urlopen(Request("https://www.bilibili.com/", headers=anon)).read()
+    except Exception as exc:  # noqa: BLE001
+        print("Bilibili warm-up skipped: %s" % type(exc).__name__, file=sys.stderr)
+
+
+def with_anon_cookies(headers, ydl):
+    """带显式 Cookie 头的请求不会再附 cookiejar 里的 Cookie(urllib / requests 都如此)。
+    配了 BLUEBIRD_COOKIE 的用户走接口回退时,把首页刚种的匿名 Cookie 拼进去,否则同样 412。"""
+    cookie = (headers or {}).get("Cookie")
+    if not cookie:
+        return headers
+    have = {part.split("=", 1)[0].strip() for part in cookie.split(";")}
+    extra = ["%s=%s" % (c.name, c.value) for c in getattr(ydl, "cookiejar", None) or []
+             if c.name in BILI_ANON_COOKIES and c.name not in have and str(getattr(c, "domain", "")).endswith("bilibili.com")]
+    return {**headers, "Cookie": "; ".join([cookie] + extra)} if extra else headers
 
 
 def bilibili_web_info(url, ydl, headers):
@@ -667,6 +730,8 @@ def run(url, save_to=None, level="audio", max_mb=None):
                   # 图文帖没有流,不加这个 flag yt-dlp 直接抛 `No video formats found` ——
                   # 加上则退成 warning 并照常回 info(缩略图/正文/时长都在)。web 版一直有,原生化时漏了。
                   "ignore_no_formats_error": True}
+    log = ProbeLog()
+    probe_opts["logger"] = log
     try:
         try:
             with YoutubeDL(probe_opts) as ydl:
@@ -674,8 +739,15 @@ def run(url, save_to=None, level="audio", max_mb=None):
                     info = ydl.extract_info(url, download=False)
                 except Exception as initial_error:
                     host = (urllib.parse.urlparse(url).hostname or "").lower()
-                    if (host == "bilibili.com" or host.endswith(".bilibili.com")) and "unable to extract initial state" in str(initial_error).lower():
-                        info = bilibili_web_info(url, ydl, headers)
+                    if (host == "bilibili.com" or host.endswith(".bilibili.com")) and bili_page_denied(initial_error):
+                        warm_bili_cookies(ydl, headers)
+                        try:
+                            info = bilibili_web_info(url, ydl, with_anon_cookies(headers, ydl))
+                        except Exception as fallback_error:
+                            if "unable to extract initial state" in str(initial_error).lower():
+                                raise
+                            # 原来那句 412 放前面:failure_result 取第一个状态码,blocked 判定也靠它
+                            raise RuntimeError("%s; API fallback failed: %s" % (initial_error, fallback_error)) from fallback_error
                     elif host.endswith("douyin.com") and "fresh cookies" in str(initial_error).lower():
                         info = douyin_web_info(url, ydl)
                     else:
@@ -691,6 +763,9 @@ def run(url, save_to=None, level="audio", max_mb=None):
             if info.get("formats") or info.get("url") or info.get("duration"):
                 raise RetrievalError("metadata", exc) from exc
             return image_post_result(info, url, media_dir, headers, max_bytes)
+        wall = sign_in_wall(log.warnings) if not (info.get("formats") or info.get("url")) else None
+        if wall:  # 平台要求登录 / 人机验证:抓取失败,不是图文帖,也别存封面
+            raise RetrievalError("metadata", wall)
         meta = build_meta(info, url)
         archive_cover(info, save_to, meta, headers)
         segments, lang = extract_subtitles(info, work_dir, langs, headers)
@@ -810,7 +885,127 @@ def selftest():
     assert is_image_post_error(Exception("ERROR: No video formats found!"))
     assert not is_image_post_error(Exception("Unable to extract initial state"))
     assert not is_image_post_error(Exception("HTTP Error 404: Not Found"))
+    selftest_datacenter_denials()
     print("selftest ok")
+
+
+def selftest_datacenter_denials():
+    """机房 IP / 代理下的两种拒绝,跑完整个 run(),yt-dlp 换成假的,不联网。"""
+    import io
+    import types
+    from contextlib import redirect_stderr
+    from unittest import mock
+    events = []
+
+    class Page:
+        def read(self):
+            return b""
+
+    def downloader(extract):
+        class YDL:
+            def __init__(self, opts):
+                self.opts, self.cookiejar = opts, []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def extract_info(self, url, download=False, process=True):
+                return extract(self, url)
+
+            def urlopen(self, request):
+                events.append(("warm", request))
+                self.cookiejar += [types.SimpleNamespace(name=n, value=n + "-v", domain=".bilibili.com") for n in BILI_ANON_COOKIES]
+                return Page()
+        return YDL
+
+    def fake(extract, **patched):
+        stack = mock.patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=downloader(extract)),
+                                              "yt_dlp.networking": types.SimpleNamespace(Request=lambda url, headers=None: (url, dict(headers or {})))})
+        return stack, mock.patch.dict(globals(), patched)
+
+    def run_fake(url, extract, **patched):
+        events.clear()
+        mods, funcs = fake(extract, **patched)
+        err = io.StringIO()
+        with mods, funcs, redirect_stderr(err):
+            try:
+                return run(url), None, err.getvalue()
+            except RetrievalError as exc:
+                return None, exc, err.getvalue()
+
+    def raiser(message):
+        def extract(ydl, url):
+            raise RuntimeError(message)
+        return extract
+
+    bili = "https://www.bilibili.com/video/BV12N4y1M7rh"
+    page_412 = ("ERROR: [BiliBili] 12N4y1M7rh: Unable to download webpage: HTTP Error 412: Precondition Failed "
+                "(caused by <HTTPError 412: Precondition Failed>)")
+    srt = {"zh-CN": [{"ext": "srt", "data": "1\n00:00:01,000 --> 00:00:02,000\n你好\n"}]}
+
+    def api_ok(url, ydl, headers):
+        events.append(("api", sorted(c.name for c in ydl.cookiejar), headers.get("Cookie")))
+        return {"id": "BV12N4y1M7rh", "title": "t", "duration": 313.5, "subtitles": srt,
+                "formats": [{"format_id": "30280", "url": "https://upos.example/a.m4s", "acodec": "mp4a"}]}
+
+    # B 站视频页 412:先开首页拿匿名 Cookie,再走接口;首页请求不带 Cookie 头
+    with mock.patch.dict(os.environ, {"BLUEBIRD_COOKIE": ""}):
+        r, exc, _ = run_fake(bili, raiser(page_412), bilibili_web_info=api_ok)
+    assert exc is None and r["source"] == "native", (r, exc)
+    assert [e[0] for e in events] == ["warm", "api"], events
+    assert events[0][1][0] == "https://www.bilibili.com/" and "Cookie" not in events[0][1][1], events[0]
+    assert events[1][1] == ["b_nut", "buvid3"] and events[1][2] is None, events[1]
+    # 配了登录 Cookie 时:首页照样不带 Cookie 头,接口请求的显式 Cookie 头里补上匿名 Cookie
+    with mock.patch.dict(os.environ, {"BLUEBIRD_COOKIE": "SESSDATA=s"}):
+        r, exc, _ = run_fake(bili, raiser(page_412), bilibili_web_info=api_ok)
+    assert exc is None and "Cookie" not in events[0][1][1], events
+    assert events[1][2] == "SESSDATA=s; buvid3=buvid3-v; b_nut=b_nut-v", events[1]
+    # 接口也被拒:报错里留着原来的 412,仍判 blocked
+    def api_denied(url, ydl, headers):
+        raise RuntimeError("Bilibili metadata denied: -352 risk control")
+    with mock.patch.dict(os.environ, {"BLUEBIRD_COOKIE": ""}):
+        r, exc, _ = run_fake(bili, raiser(page_412), bilibili_web_info=api_denied)
+    failed = failure_result(exc)["error"]
+    assert exc.stage == "metadata" and failed["blocked"] and failed["code"] == "412", failed
+    assert "-352" in failed["message"], failed
+    # 404 不走回退,也不去开首页
+    r, exc, _ = run_fake(bili, raiser("HTTP Error 404: Not Found"), bilibili_web_info=api_ok)
+    assert exc is not None and events == [], events
+    # 抖音分享页回退照旧:不开 B 站首页
+    def douyin_ok(url, ydl):
+        events.append(("douyin",))
+        return {"id": "1", "title": "d", "duration": 8, "subtitles": srt, "formats": [{"url": "https://aweme.example/p"}]}
+    r, exc, _ = run_fake("https://www.douyin.com/video/1", raiser("Fresh cookies (not necessarily logged in) are needed"), douyin_web_info=douyin_ok)
+    assert exc is None and events == [("douyin",)], (events, exc)
+
+    # YouTube 人机验证:没有流、时长 0、有封面,但带着那条警告 → 抓取失败,不是图文帖
+    wall = ("[youtube] arj7oStGLkU: Sign in to confirm you\u2019re not a bot. This helps protect our community. "
+            "Use --cookies-from-browser or --cookies for the authentication.")
+    walled = {"id": "arj7oStGLkU", "title": "A talk", "duration": 0, "uploader": "TED", "description": "talk",
+              "thumbnails": [{"url": "https://i.ytimg.com/vi/arj7oStGLkU/hq720.jpg"}]}
+
+    def answer(info, *warnings):
+        def extract(ydl, url):
+            for w in warnings:
+                ydl.opts["logger"].warning(w)
+            ydl.opts["logger"].debug("[youtube] Extracting URL")
+            return dict(info)
+        return extract
+    r, exc, err = run_fake("https://www.youtube.com/watch?v=arj7oStGLkU", answer(walled, wall, "No video formats found!"))
+    assert r is None and exc is not None, r
+    failed = failure_result(exc)["error"]
+    assert failed["blocked"] and failed["stage"] == "metadata" and "not a bot" in failed["message"], failed
+    assert "WARNING: " + wall in err and "Extracting URL" not in err, err  # 警告照旧进 stderr,调试输出不进
+    # 同样的形状没有那条警告 = 真图文帖,行为不变
+    r, exc, _ = run_fake("https://www.xiaohongshu.com/explore/abc", answer(walled, "No video formats found!"))
+    assert exc is None and r["source"] == "image_text", (r, exc)
+    # 有字幕的正常视频不受影响(哪怕有登录相关的警告)
+    normal = {**walled, "duration": 120, "subtitles": srt, "formats": [{"format_id": "140", "url": "https://x/a", "acodec": "mp4a"}]}
+    r, exc, _ = run_fake("https://www.youtube.com/watch?v=x", answer(normal, "Subtitles are only available when logged in"))
+    assert exc is None and r["source"] == "native" and r["text"] == "你好", (r, exc)
 
 
 def parse_args(argv):
