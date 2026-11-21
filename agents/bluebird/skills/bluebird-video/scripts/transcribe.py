@@ -584,7 +584,7 @@ def failure_result(err):
     message = re.sub(r"(?i)([?&](?:token|sign|signature|auth|wsSecret|wsTime|deadline|expires)=)[^&\s]+", r"\1[REDACTED]", message)
     message = re.sub(r"(?i)(cookie|authorization)\s*[:=][^\r\n]+", r"\1=[REDACTED]", message)
     code = re.search(r"(?:HTTP(?: Error)?\s*|code[=: ]+)(-?\d{3})", message, re.I)
-    blocked = bool(re.search(r"(?:\b412\b|\b567\b|request was banned|forbidden|login|required|sign.?in)", message, re.I))
+    blocked = bool(re.search(r"(?:\b412\b|\b567\b|request was banned|forbidden|login|required|sign.?in|not a bot)", message, re.I))
     return {"ok": False, "error": {"stage": getattr(err, "stage", "dependencies"), "message": message, "code": code.group(1) if code else "", "blocked": blocked},
             "diagnostics": diagnostics(), "nextActions": ["Open the source in your browser", "Import local media or subtitles", "Retry after the source is accessible"]}
 
@@ -602,13 +602,19 @@ BILI_ANON_COOKIES = ("buvid3", "b_nut")
 def warm_bili_cookies(ydl, headers):
     """像匿名浏览器那样先开一次 B 站首页,拿平台种下的匿名 Cookie(buvid3、b_nut)。
     视频页被 412 拦下时 cookiejar 里什么都没有,不带它们的接口请求同样回 412(实测)。
-    请求本身不加 Cookie 头;已有 buvid3 就不再开。尽力而为:失败只记一行,原来的错误照常上报。"""
+    这次请求用一只空 cookiejar,不带 Cookie 头,所以不会带上登录信息(BLUEBIRD_COOKIE 早被 yt-dlp 收进了主 jar);
+    拿到的匿名 Cookie 再拷回主 jar。两样都有就不再开。尽力而为:失败只记一行,原来的错误照常上报。"""
     try:
-        if any(c.name == "buvid3" for c in getattr(ydl, "cookiejar", None) or []):
+        if set(BILI_ANON_COOKIES) <= {c.name for c in ydl.cookiejar}:
             return
+        from yt_dlp.cookies import YoutubeDLCookieJar
         from yt_dlp.networking import Request
+        fresh = YoutubeDLCookieJar()
         anon = {k: v for k, v in (headers or {}).items() if k.lower() != "cookie"}
-        ydl.urlopen(Request("https://www.bilibili.com/", headers=anon)).read()
+        ydl.urlopen(Request("https://www.bilibili.com/", headers=anon, extensions={"cookiejar": fresh})).read()
+        for cookie in fresh:
+            if cookie.name in BILI_ANON_COOKIES:
+                ydl.cookiejar.set_cookie(cookie)
     except Exception as exc:  # noqa: BLE001
         print("Bilibili warm-up skipped: %s" % type(exc).__name__, file=sys.stderr)
 
@@ -901,10 +907,14 @@ def selftest_datacenter_denials():
         def read(self):
             return b""
 
+    class Jar(list):
+        def set_cookie(self, cookie):
+            self.append(cookie)
+
     def downloader(extract):
         class YDL:
             def __init__(self, opts):
-                self.opts, self.cookiejar = opts, []
+                self.opts, self.cookiejar = opts, Jar()
 
             def __enter__(self):
                 return self
@@ -916,14 +926,18 @@ def selftest_datacenter_denials():
                 return extract(self, url)
 
             def urlopen(self, request):
-                events.append(("warm", request))
-                self.cookiejar += [types.SimpleNamespace(name=n, value=n + "-v", domain=".bilibili.com") for n in BILI_ANON_COOKIES]
+                jar = request[2].get("cookiejar", self.cookiejar)
+                events.append(("warm", request, jar is not self.cookiejar and not jar))
+                for n in BILI_ANON_COOKIES:
+                    jar.set_cookie(types.SimpleNamespace(name=n, value=n + "-v", domain=".bilibili.com"))
                 return Page()
         return YDL
 
     def fake(extract, **patched):
         stack = mock.patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=downloader(extract)),
-                                              "yt_dlp.networking": types.SimpleNamespace(Request=lambda url, headers=None: (url, dict(headers or {})))})
+                                              "yt_dlp.cookies": types.SimpleNamespace(YoutubeDLCookieJar=Jar),
+                                              "yt_dlp.networking": types.SimpleNamespace(
+                                                  Request=lambda url, headers=None, extensions=None: (url, dict(headers or {}), dict(extensions or {})))})
         return stack, mock.patch.dict(globals(), patched)
 
     def run_fake(url, extract, **patched):
@@ -957,6 +971,7 @@ def selftest_datacenter_denials():
     assert exc is None and r["source"] == "native", (r, exc)
     assert [e[0] for e in events] == ["warm", "api"], events
     assert events[0][1][0] == "https://www.bilibili.com/" and "Cookie" not in events[0][1][1], events[0]
+    assert events[0][2], "首页用一只新的空 jar,登录 Cookie 不跟过去"
     assert events[1][1] == ["b_nut", "buvid3"] and events[1][2] is None, events[1]
     # 配了登录 Cookie 时:首页照样不带 Cookie 头,接口请求的显式 Cookie 头里补上匿名 Cookie
     with mock.patch.dict(os.environ, {"BLUEBIRD_COOKIE": "SESSDATA=s"}):
@@ -971,6 +986,7 @@ def selftest_datacenter_denials():
     failed = failure_result(exc)["error"]
     assert exc.stage == "metadata" and failed["blocked"] and failed["code"] == "412", failed
     assert "-352" in failed["message"], failed
+    assert failure_result(RetrievalError("metadata", "Please confirm you are not a bot"))["error"]["blocked"]
     # 404 不走回退,也不去开首页
     r, exc, _ = run_fake(bili, raiser("HTTP Error 404: Not Found"), bilibili_web_info=api_ok)
     assert exc is not None and events == [], events
