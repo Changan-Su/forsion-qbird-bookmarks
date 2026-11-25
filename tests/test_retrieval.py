@@ -236,5 +236,29 @@ class RetrievalChecks(unittest.TestCase):
                 module.douyin_web_info("https://www.douyin.com/video/123", ydl_for({"loaderData": {"video_(id)/page": {"videoInfoRes": {"item_list": []}}}}))
 
 
+    def test_short_link_is_expanded_before_the_412_fallback(self):
+        seen = []
+        class Downloader:
+            def __init__(self, options): self.options = options
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def extract_info(self, url, *args, **kwargs):
+                seen.append(url)
+                raise RuntimeError("ERROR: [BiliBili] BV1xx411c7mD: Unable to download webpage: HTTP Error 412: Precondition Failed")
+        fallback = []
+        def web_info(url, ydl, headers):
+            fallback.append(url)
+            raise RuntimeError("denied")
+        expanded = "https://www.bilibili.com/video/BV1xx411c7mD/?p=1"
+        with patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=Downloader)}), \
+             patch.object(module, "expand_short_url", lambda url: expanded if url == "https://b23.tv/AbCd12" else url), \
+             patch.object(module, "warm_bili_cookies", lambda ydl, headers: None), \
+             patch.object(module, "bilibili_web_info", web_info):
+            with self.assertRaises(module.RetrievalError) as raised:
+                module.run("https://b23.tv/AbCd12")
+        self.assertEqual(seen, [expanded])
+        self.assertEqual(fallback, [expanded], "the API fallback must see the full Bilibili URL, not the short link")
+        self.assertIn("412", str(raised.exception))
+
 if __name__ == "__main__":
     unittest.main()

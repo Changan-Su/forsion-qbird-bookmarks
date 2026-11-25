@@ -1,3 +1,16 @@
+## 2.5.0 — 2026-11-25
+
+- Video fetching now also works on engines that have no shell but run a plugin's own bundled scripts. Bluebird runs its fetch script through that entry and, for videos without subtitles, has the engine transcribe the audio in the same task. The host has to declare this; on desktop nothing changes.
+- Bilibili short links (b23.tv) are expanded first, so they get the same handling as full links, including the fallback below.
+- When the Bilibili video page refuses the request (HTTP 412), Bluebird takes the anonymous cookie from the Bilibili home page and uses the public video API instead, so the audio can still be fetched.
+- When YouTube asks to sign in to prove you are not a bot, the fetch now fails with that reason instead of saving an empty image post.
+- On device pages opened through the relay, engine requests no longer carry the placeholder token, which made every request fail with 401.
+- 没有命令行、但能跑插件自带脚本的引擎上，现在也能抓视频：青鸟经这个入口跑自带的抓取脚本；没字幕的视频由引擎在同一个任务里转写音频。要宿主声明支持；桌面上不变。
+- B 站短链（b23.tv）先展开成完整链接，再按完整链接处理，下面那条回退也照样走。
+- B 站视频页拒绝请求（HTTP 412）时，先从 B 站首页拿匿名 Cookie，再走公开的视频接口，音频照样能下到。
+- YouTube 要求登录证明不是机器人时，如实报获取失败，不再存成一条空的图文收藏。
+- 经中转打开的设备页上，发给引擎的请求不再带占位令牌（之前每个请求都会 401）。
+
 ## 2.4.1 — 2026-11-09
 
 - Xiaohongshu and other platforms without a separate audio track now download the platform's own compressed version (720p or lower) instead of the original upload. A 5-minute Xiaohongshu video went from 801 MB (1440p, 60 fps) to 48 MB (720p) and from minutes to about 20 seconds. Full video still takes up to 1080p, and the original upload is only used when it is the only version. Bilibili and YouTube still fetch audio only.
