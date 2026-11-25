@@ -30,6 +30,7 @@ import shutil
 import sys
 import tempfile
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -535,6 +536,50 @@ def normalize_url(url):
     return url
 
 
+# B 站的分享短链。只认这两个主机;展开后必须落在 B 站自己的主机上。
+BILI_SHORT_HOSTS = ("b23.tv", "www.b23.tv", "bili2233.cn", "www.bili2233.cn")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """一跳一跳自己跟:展开到 B 站主机就停,不去开那张视频页(机房 IP 上它回 412)。"""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def expand_short_url(url, opener=None, max_hops=5):
+    """b23.tv 分享短链 → 完整的 B 站链接,之后才轮得到 412 的接口回退(它按 bilibili.com 主机和 /video/BV 路径认)。
+    不带 Cookie(短链服务不需要登录信息);查询串只留分 P 的 p,分享来源这类追踪参数去掉。
+    展开不了 / 展开到别家主机 → RetrievalError,不拿短链本身去抓。"""
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host not in BILI_SHORT_HOSTS:
+        return url
+    opener = opener or urllib.request.build_opener(_NoRedirect)
+    current = url
+    for _ in range(max_hops):
+        req = urllib.request.Request(current, headers={"User-Agent": os.environ.get("BLUEBIRD_UA", "").strip() or DEFAULT_UA})
+        try:
+            with opener.open(req, timeout=15) as resp:
+                location = None
+                status = getattr(resp, "status", 200)
+        except urllib.error.HTTPError as exc:
+            status, location = exc.code, exc.headers.get("Location") if exc.headers else None
+        except Exception as exc:  # noqa: BLE001 — 网络错误原样带回
+            raise RetrievalError("metadata", "Could not expand the Bilibili short link: %s" % exc) from exc
+        if status not in (301, 302, 303, 307, 308) or not location:
+            raise RetrievalError("metadata", "The Bilibili short link did not redirect (HTTP %s); it may have expired" % status)
+        current = urllib.parse.urljoin(current, location)
+        parts = urllib.parse.urlparse(current)
+        next_host = (parts.hostname or "").lower()
+        if next_host in BILI_SHORT_HOSTS:
+            continue
+        if parts.scheme not in ("http", "https") or not (next_host == "bilibili.com" or next_host.endswith(".bilibili.com")):
+            raise RetrievalError("metadata", "The short link leads to %s, not a Bilibili page" % (next_host or "an invalid address"))
+        page = urllib.parse.parse_qs(parts.query).get("p", [])
+        query = urllib.parse.urlencode({"p": page[-1]}) if page and page[-1].isdigit() else ""
+        return parts._replace(scheme="https", query=query, fragment="").geturl()
+    raise RetrievalError("metadata", "The Bilibili short link redirected too many times")
+
+
 def xiaohongshu_author(url, ydl, headers):
     """yt-dlp 只给 uploader_id(一串十六进制);昵称在同一页的初始状态里。取不到就算了,不影响抓取。"""
     from yt_dlp.networking import Request
@@ -727,7 +772,7 @@ def run(url, save_to=None, level="audio", max_mb=None):
         raise RetrievalError("dependencies", "yt-dlp is unavailable in this Python runtime") from exc
     langs = [s.strip() for s in os.environ.get(
         "BLUEBIRD_LANGS", "zh-Hans,zh-CN,zh,en,en-US").split(",") if s.strip()]
-    url = normalize_url(url)
+    url = normalize_url(expand_short_url(url))
     headers = request_headers(url)
     work_dir = Path(tempfile.mkdtemp(prefix="bluebird_"))
     probe_opts = {"quiet": True, "noprogress": True, "noplaylist": True,
@@ -892,6 +937,7 @@ def selftest():
     assert not is_image_post_error(Exception("Unable to extract initial state"))
     assert not is_image_post_error(Exception("HTTP Error 404: Not Found"))
     selftest_datacenter_denials()
+    selftest_short_links()
     print("selftest ok")
 
 
@@ -1022,6 +1068,53 @@ def selftest_datacenter_denials():
     normal = {**walled, "duration": 120, "subtitles": srt, "formats": [{"format_id": "140", "url": "https://x/a", "acodec": "mp4a"}]}
     r, exc, _ = run_fake("https://www.youtube.com/watch?v=x", answer(normal, "Subtitles are only available when logged in"))
     assert exc is None and r["source"] == "native" and r["text"] == "你好", (r, exc)
+
+
+class _FakeRedirects:
+    """expand_short_url 的假 opener:按 URL 给 30x + Location;记下每次请求(看有没有带 Cookie、有没有开视频页)。"""
+    def __init__(self, table):
+        self.table, self.seen = table, []
+
+    def open(self, req, timeout=None):
+        url = req.full_url
+        self.seen.append((url, req.get_header("Cookie")))
+        status, location = self.table.get(url, (200, None))
+        if location is None:
+            return _FakeResponse(status)
+        raise urllib.error.HTTPError(url, status, "Found", {"Location": location}, None)
+
+
+class _FakeResponse:
+    def __init__(self, status):
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def selftest_short_links():
+    # b23.tv → 完整链接:只留分 P,追踪参数去掉;展开到 B 站主机就停,不去开视频页;不带 Cookie
+    fake = _FakeRedirects({"https://b23.tv/AbCd12": (302, "https://www.bilibili.com/video/BV1xx411c7mD/?share_source=copy_web&vd_source=x&p=2")})
+    assert expand_short_url("https://b23.tv/AbCd12", fake) == "https://www.bilibili.com/video/BV1xx411c7mD/?p=2"
+    assert [u for u, _ in fake.seen] == ["https://b23.tv/AbCd12"] and all(c is None for _, c in fake.seen), fake.seen
+    # 两跳短链、相对地址、手机站
+    fake = _FakeRedirects({"https://b23.tv/x": (301, "https://bili2233.cn/y"), "https://bili2233.cn/y": (302, "//m.bilibili.com/video/BV1xx411c7mD")})
+    assert expand_short_url("https://b23.tv/x", fake) == "https://m.bilibili.com/video/BV1xx411c7mD"
+    # 展开后不是 B 站 / 不跳 / 跳太多 → 报错,不拿短链本身去抓
+    for table, word in (({"https://b23.tv/e": (302, "https://evil.example/bilibili.com/video/BV1xx411c7mD")}, "not a Bilibili page"),
+                        ({}, "did not redirect"),
+                        ({"https://b23.tv/l": (302, "https://b23.tv/l")}, "too many times")):
+        try:
+            expand_short_url(list(table)[0] if table else "https://b23.tv/none", _FakeRedirects(table))
+            raise AssertionError("expected a failure: " + word)
+        except RetrievalError as exc:
+            assert exc.stage == "metadata" and word in str(exc), exc
+    # 别的链接原样,不发请求
+    fake = _FakeRedirects({})
+    assert expand_short_url("https://www.bilibili.com/video/BV1xx411c7mD", fake) == "https://www.bilibili.com/video/BV1xx411c7mD" and not fake.seen
 
 
 def parse_args(argv):

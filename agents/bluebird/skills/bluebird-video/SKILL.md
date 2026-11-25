@@ -1,7 +1,7 @@
 ---
 name: 青鸟视频分析
 description: 当用户给出一条视频链接(Bilibili / YouTube / 抖音 / 小红书)或想要总结、问答、翻译某个视频内容时使用;小红书这类**图文帖**(没有音轨)走本技能的「图文剪藏」一节;给出音乐链接(网易云 / QQ 音乐 / Apple Music)想收藏一首歌时,走本技能的「音乐剪藏」一节。先用 yt-dlp 抓原生/自动字幕(无字幕则交由 Forsion 的语音识别转写),再产出结构化 Markdown 总结、基于字幕的问答与字幕翻译。
-version: 1.2.0
+version: 1.3.0
 category: 内容分析
 ---
 
@@ -21,6 +21,16 @@ category: 内容分析
 - The script returns structured errors with a retrieval stage and actual message. Initial-state parsing failures are not evidence of an image post. HTTP 412 / 567, authentication and region restrictions must remain failures. Stop blind retries; offer opening the source in the browser or importing local media/subtitles. Never invent source content or quietly switch the target.
 - If the caller owns ASR, return its requested machine block including the real audio path, metadata and archived assets. Do not call another speech service. When fetching fails, use the caller's error block and keep the real stage/code.
 - Use only source timestamps. Without timestamps, omit time references. Do not imply that audio was saved as video. Only embed assets actually returned by the script.
+
+## No shell: run_plugin_script (2.5)
+
+Some engines have no shell. There `run_bash` is not listed and `run_plugin_script` is: it runs a script that ships inside this skill folder, one at a time, for a few minutes at most. Everything else in this skill stays the same.
+
+- Call it with `skill: "bluebird-video"`, `script: "scripts/transcribe.py"` (or `scripts/music_meta.py`) and `args` as a list, for example `["<video URL>"]`. `--diagnose` works the same way. Do not search for the script; a copy you write yourself cannot run.
+- The host provides yt-dlp and ffmpeg. Do not try to install anything.
+- Paths in `args` must stay inside your account folder. Pass `--save-to` only when the caller gives you a folder; without it nothing is archived and the result has no `assets`.
+- `needs_asr`: the `audio_path` is in this turn's temporary folder, which is deleted when the turn ends. Call `transcribe_audio(path=<audio_path>, timestamps=true)` in the same turn, then organize the transcript; its segments are the only valid timestamps. If `transcribe_audio` is not listed or fails, report that failure. Never summarize from the title.
+- Output and errors are the same JSON as with run_bash. The user's Bilibili sign-in is never passed here, so Bilibili videos usually go through `needs_asr`.
 
 ## 转录(host 模式 · 用 run_bash 跑 scripts/transcribe.py)
 

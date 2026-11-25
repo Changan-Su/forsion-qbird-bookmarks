@@ -787,6 +787,35 @@ A.equal(T.t('queueTitle'), '整理队列')
       return { text: 'Caption', segments: [{ start: 0, end: 2, text: 'Caption' }] }
     }
     A.deepEqual(await T.asrTranscribeFile('/unit/audio.wav'), { text: 'Caption', segments: [{ start: 0, end: 2, text: 'Caption' }] })
+
+    // ── 插件脚本入口:没有 shell 的多账号引擎(executionCapabilities.pluginScripts)──
+    delete window.tangu.transcribeAudioFile
+    window.tangu.executionCapabilities = { host: false, pluginScripts: true }
+    window.tangu.getConfig = async () => ({ backendUrl: '/web/engine', token: 'tunnel', modelId: 'fixture' })
+    cfg = await T.getCfg()
+    A.equal(T.engineError(cfg), '', 'plugin scripts are enough to run the fetch on a page whose identity comes from the page')
+    A.equal(T.scriptMode(cfg), true)
+    A.deepEqual(T.engineHeaders(cfg), {}, 'the device-page placeholder token is never sent as a bearer token')
+    A.deepEqual(T.engineHeaders(cfg, true), { 'Content-Type': 'application/json' })
+    calls.length = 0
+    A.equal(await T.runAgent(cfg, 'session', 'Analyze', null), '# Local engine result')
+    A.equal(calls[0].options.headers.Authorization, undefined, 'starting a run must not carry the placeholder')
+    A.equal(calls[1].options.headers.Authorization, undefined, 'subscribing must not carry the placeholder')
+    window.tangu.getConfig = async () => ({ backendUrl: '/web/engine', token: '', modelId: 'fixture' })
+    A.equal(T.engineError(await T.getCfg()), '', 'an empty token on a Unit page is not a missing sign-in')
+    window.tangu.executionCapabilities = { host: false }
+    A.equal(T.engineError(await T.getCfg()), 'errNoHostExecution', 'neither shell nor plugin scripts: still only save and read')
+    window.tangu.executionCapabilities = { host: true, pluginScripts: true }
+    A.equal(T.scriptMode(await T.getCfg()), false, 'a host with a shell keeps the run_bash path')
+    const task = { url: 'https://b23.tv/AbCd12', tpl: '通用', detail: 'standard', requirements: '', plat: { platform: 'bilibili', videoId: '' } }
+    const msg = T.scriptTask(task, '<spec>')
+    A.ok(msg.includes('run_plugin_script') && msg.includes('skill "bluebird-video"') && msg.includes('args ["https://b23.tv/AbCd12"]'), msg)
+    A.ok(!msg.includes('run_bash') && !msg.includes('--save-to') && !msg.includes('The host handles speech recognition'), 'no shell, no archive, no host speech hand-off')
+    A.ok(/transcribe_audio[\s\S]*same turn/.test(msg), 'speech recognition happens in the same turn')
+    const music = T.scriptTask({ ...task, url: 'https://music.163.com/song?id=1', plat: { platform: 'netease', videoId: '' } }, '<spec>')
+    A.ok(music.includes('scripts/music_meta.py') && !music.includes('transcribe.py'), music)
+    A.equal(T.stageOf({ type: 'tool_call', payload: { name: 'run_plugin_script' } }, '').key, 'stgFetching')
+    A.equal(T.stageOf({ type: 'tool_call', payload: { name: 'transcribe_audio' } }, '').key, 'stgAsr')
   } finally {
     globalThis.fetch = originalFetch
     delete globalThis.window
@@ -795,6 +824,12 @@ A.equal(T.t('queueTitle'), '整理队列')
     delete ctx.app.hostPath; delete ctx.app.assetUrl
     delete ctx.getLocale
   }
+  // Desktop without a token still needs sign-in; the placeholder is not a token there either.
+  globalThis.window = { tangu: { getConfig: async () => ({ backendUrl: 'http://127.0.0.1:1', token: '' }) } }
+  A.equal(T.engineError(await T.getCfg()), 'errNeedLogin')
+  window.tangu.getConfig = async () => ({ backendUrl: 'http://127.0.0.1:1', token: 'tunnel' })
+  A.equal(T.engineError(await T.getCfg()), 'errNeedLogin')
+  delete globalThis.window
   // Legacy desktop fallback remains available, while a cloud URI is never treated as a path.
   VAULT.root = 'cloud://vault-id'
   A.equal(T.mediaSaveDir(), null)

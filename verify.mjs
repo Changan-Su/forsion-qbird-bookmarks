@@ -29,7 +29,7 @@ const TOOLS = new Set(['add_muse_todo', 'amadeus_list_notes', 'amadeus_read_note
   'manage_agent', 'manage_schedule', 'muse_watch', 'pip_install', 'read_activity', 'read_file', 'read_log',
   'read_process_output', 'remember', 'run_background', 'run_python', 'search_files', 'start_discussion',
   'todo_read', 'todo_write', 'transcribe_audio', 'use_skill', 'wait_discussion', 'web_fetch', 'web_search', 'wechat_send_file',
-  'wechat_send_image', 'write_file', 'write_process_input', 'run_bash'])
+  'wechat_send_image', 'write_file', 'write_process_input', 'run_bash', 'run_plugin_script'])
 
 function parseFrontmatter(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)

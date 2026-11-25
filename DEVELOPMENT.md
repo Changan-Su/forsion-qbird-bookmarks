@@ -11,6 +11,8 @@
 - `ctx.app.assetUrl(vaultRelativePath): string` 复用宿主的资源 URL 构造器,保留 Unit 临时资源令牌/云端资产处理。
 - `ctx.app.hostPath(vaultRelativePath): string | null` 只返回与当前执行引擎同机的真实路径;null 表示素材不落本机,不能再拿 `vaultRoot()` 猜。
 - `window.tangu.executionCapabilities.host` 是显式 Unit / Web 本机执行能力声明;`getConfig()` 返回 Unit 代理地址与当前会话令牌。没有配置时不回落 `/api`,也不读取旧全局 `forsion_token`。
+- `window.tangu.executionCapabilities.pluginScripts === true`(2.5.0)= 引擎没有 shell,但能用 `run_plugin_script` 跑插件包里自带的脚本:青鸟改走这条,素材不落盘,无字幕的音频在同一轮里由引擎的 `transcribe_audio` 转写(脚本的临时目录这一轮结束就删)。`host` 为真时永远走 run_bash 老路。
+- 设备页(`unitPage`)的引擎请求身份由页面带:令牌是空串或占位值 `tunnel` 时不发 `Authorization`(同宿主 `unitAuthHeader`),也不报「要登录」。
 - 旧桌面无新契约时保留原有引擎接入,素材目录只接受真实绝对路径,不会把 `cloud://` 当本机目录。
 - 不提供 `transcribeAudioFile` 的宿主会在无字幕分支显示真实能力缺口,不会把错误当作成功的总结。
 
