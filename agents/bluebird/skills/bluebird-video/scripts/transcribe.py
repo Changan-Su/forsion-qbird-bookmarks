@@ -556,6 +556,11 @@ def expand_short_url(url, opener=None, max_hops=5):
     opener = opener or urllib.request.build_opener(_NoRedirect)
     current = url
     for _ in range(max_hops):
+        # 每一跳发出去之前:只走 https(短链服务本身支持;明文跳转不跟)
+        hop = urllib.parse.urlparse(current)
+        if hop.scheme not in ("http", "https"):
+            raise RetrievalError("metadata", "The Bilibili short link leads to an unsupported address")
+        current = hop._replace(scheme="https").geturl()
         req = urllib.request.Request(current, headers={"User-Agent": os.environ.get("BLUEBIRD_UA", "").strip() or DEFAULT_UA})
         try:
             with opener.open(req, timeout=15) as resp:
@@ -1112,6 +1117,10 @@ def selftest_short_links():
             raise AssertionError("expected a failure: " + word)
         except RetrievalError as exc:
             assert exc.stage == "metadata" and word in str(exc), exc
+    # 明文的短链 / 明文的下一跳一律改走 https 再发
+    fake = _FakeRedirects({"https://b23.tv/h": (302, "http://bili2233.cn/z"), "https://bili2233.cn/z": (302, "http://www.bilibili.com/video/BV1xx411c7mD")})
+    assert expand_short_url("http://b23.tv/h", fake) == "https://www.bilibili.com/video/BV1xx411c7mD"
+    assert [u for u, _ in fake.seen] == ["https://b23.tv/h", "https://bili2233.cn/z"], fake.seen
     # 别的链接原样,不发请求
     fake = _FakeRedirects({})
     assert expand_short_url("https://www.bilibili.com/video/BV1xx411c7mD", fake) == "https://www.bilibili.com/video/BV1xx411c7mD" and not fake.seen
